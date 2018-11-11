@@ -7,7 +7,7 @@
 #define GET_LRU(id) (id & (3<<6))
 
 /* See items.c */
-uint64_t get_cas_id(void);
+        uint64_t get_cas_id(void);
 
 /*@null@*/
 item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags, const rel_time_t exptime, const int nbytes);
@@ -43,14 +43,14 @@ struct lru_pull_tail_return {
 };
 
 int lru_pull_tail(const int orig_id, const int cur_lru,
-        const uint64_t total_bytes, const uint8_t flags, const rel_time_t max_age,
-        struct lru_pull_tail_return *ret_it);
+                  const uint64_t total_bytes, const uint8_t flags, const rel_time_t max_age,
+                  struct lru_pull_tail_return *ret_it);
 
 /*@null@*/
 char *item_cachedump(const unsigned int slabs_clsid, const unsigned int limit, unsigned int *bytes);
 void item_stats(ADD_STAT add_stats, void *c);
 void do_item_stats_add_crawl(const int i, const uint64_t reclaimed,
-        const uint64_t unfetched, const uint64_t checked);
+                             const uint64_t unfetched, const uint64_t checked);
 void item_stats_totals(ADD_STAT add_stats, void *c);
 /*@null@*/
 void item_stats_sizes(ADD_STAT add_stats, void *c);

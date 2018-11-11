@@ -20,6 +20,7 @@
 #include <assert.h>
 #include <grp.h>
 
+
 #include "itoa_ljust.h"
 #include "protocol_binary.h"
 #include "cache.h"
@@ -31,6 +32,156 @@
 #endif
 
 #include "sasl_defs.h"
+
+
+/** bdb specific changes */
+#include <db.h>
+#define DBFILE "data.db"
+#define DBHOME "/home/memcachedb"
+#define BDB_EID_SELF -3
+
+/**
+ * Structure for storing items within memcached.
+ */
+typedef struct _stritem {
+    /* Protected by LRU locks */
+    struct _stritem *next;
+    struct _stritem *prev;
+    /* Rest are protected by an item lock */
+    struct _stritem *h_next;    /* hash chain next */
+    rel_time_t      time;       /* least recent access */
+    rel_time_t      exptime;    /* expire time */
+    int             nbytes;     /* size of data */
+    unsigned short  refcount;
+    uint8_t         nsuffix;    /* length of flags-and-length string */
+    uint8_t         it_flags;   /* ITEM_* above */
+    uint8_t         slabs_clsid;/* which slab class we're in */
+    uint8_t         nkey;       /* key length, w/terminating null and padding */
+    /* this odd type prevents type-punning issues when we do
+     * the little shuffle to save space when not using CAS. */
+    union {
+        uint64_t cas;
+        char end;
+    } data[];
+    /* if it_flags & ITEM_CAS we have 8 bytes CAS */
+    /* then null-terminated key */
+    /* then " flags length\r\n" (no terminating null) */
+    /* then data with terminating \r\n (no terminating null; it's binary!) */
+} item;
+
+struct settings_bdb {
+    size_t item_buf_size;
+    int maxconns;
+    int port;
+    int udpport;
+    char *inter;
+    int verbose;
+    char socketpath;   /* path to unix socket if using local socket */
+    int access;  /* access mask (a la chmod) for unix domain socket */
+    int num_threads;        /* number of libevent threads to run */
+};
+extern struct settings_bdb settings_bdb;
+
+struct bdb_version {
+    int majver;
+    int minver;
+    int patch;
+};
+
+struct bdb_settings {
+    char *db_file;    /* db filename, where dbfile located. */
+    char *env_home;    /* db env home dir path */
+    char *log_home;    /* db log home dir path*/
+    u_int64_t cache_size; /* cache size */
+    u_int32_t txn_lg_bsize; /* transaction log buffer size */
+    u_int32_t page_size;    /* underlying database pagesize*/
+    DBTYPE db_type;
+    int txn_nosync;    /* DB_TXN_NOSYNC flag, if 1 will lose transaction's durability for performance */
+    int log_auto_remove;    /* DB_LOG_AUTO_REMOVE flag, if 1 will make catastrophic recovery impossible. */
+    int dldetect_val; /* do deadlock detect every *db_lock_detect_val* millisecond, 0 for disable */
+    int chkpoint_val;  /* do checkpoint every *db_chkpoint_val* second, 0 for disable */
+    int memp_trickle_val;  /* do memp_trickle every *memp_trickle_val* second, 0 for disable */
+    int memp_trickle_percent; /* percent of the pages in the cache that should be clean.*/
+    u_int32_t db_flags; /* database open flags */
+    u_int32_t env_flags; /* env open flags */
+
+    int is_replicated; /* replication is ON?? */
+
+    char *rep_localhost; /* local host in replication */
+    int rep_localport;  /* local port in replication */
+    char *rep_remotehost; /* remote host in replication */
+    int rep_remoteport;  /* remote port in replication */
+
+    int rep_whoami;  /* replication role, MDB_MASTER/MDB_CLIENT/MDB_UNKNOWN */
+    int rep_master_eid; /* replication master's eid */
+
+    u_int32_t rep_start_policy;
+    u_int32_t rep_nsites;
+
+    int rep_ack_policy;
+
+    u_int32_t rep_ack_timeout;
+    u_int32_t rep_chkpoint_delay;
+    u_int32_t rep_conn_retry;
+    u_int32_t rep_elect_timeout;
+    u_int32_t rep_elect_retry;
+    u_int32_t rep_heartbeat_monitor; /* only available on a client */
+    u_int32_t rep_heartbeat_send;    /* only available on a master */
+    u_int32_t rep_lease_timeout;
+
+    int rep_bulk;
+    int rep_lease;  /* if master lease is enabled? */
+
+    u_int32_t rep_priority;
+
+    u_int32_t rep_req_max;
+    u_int32_t rep_req_min;
+
+    u_int32_t rep_fast_clock;
+    u_int32_t rep_slow_clock;
+
+    u_int32_t rep_limit_gbytes;
+    u_int32_t rep_limit_bytes;
+};
+
+extern struct bdb_settings bdb_settings;
+extern struct bdb_version bdb_version;
+
+/* bdb management */
+
+
+
+void bdb_settings_init(void);
+void bdb_env_init(void);
+void bdb_db_open(void);
+void start_chkpoint_thread(void);
+void start_memp_trickle_thread(void);
+void start_dl_detect_thread(void);
+void bdb_db_close(void);
+void bdb_env_close(void);
+void bdb_chkpoint(void);
+int bdb_defcmp(void *a, size_t i, void *b, size_t j);
+
+/* bdb related stats */
+void stats_bdb(char *temp);
+void stats_rep(char *temp);
+void stats_repmgr(char *temp);
+void stats_repcfg(char *temp);
+void stats_repms(char *temp);
+
+#define BDB_CLEANUP_DBT() \
+    memset(&dbkey, 0, sizeof(dbkey)); \
+    memset(&dbdata, 0, sizeof(dbdata))
+
+extern DB_ENV *env;
+extern DB *dbp;
+
+extern int daemon_quit;
+
+
+
+/** End of bdb changes */
+
 
 /** Maximum length of a key. */
 #define KEY_MAX_LENGTH 250
@@ -458,34 +609,7 @@ extern struct settings settings;
 #define ITEM_HDR 128
 #endif
 
-/**
- * Structure for storing items within memcached.
- */
-typedef struct _stritem {
-    /* Protected by LRU locks */
-    struct _stritem *next;
-    struct _stritem *prev;
-    /* Rest are protected by an item lock */
-    struct _stritem *h_next;    /* hash chain next */
-    rel_time_t      time;       /* least recent access */
-    rel_time_t      exptime;    /* expire time */
-    int             nbytes;     /* size of data */
-    unsigned short  refcount;
-    uint8_t         nsuffix;    /* length of flags-and-length string */
-    uint8_t         it_flags;   /* ITEM_* above */
-    uint8_t         slabs_clsid;/* which slab class we're in */
-    uint8_t         nkey;       /* key length, w/terminating null and padding */
-    /* this odd type prevents type-punning issues when we do
-     * the little shuffle to save space when not using CAS. */
-    union {
-        uint64_t cas;
-        char end;
-    } data[];
-    /* if it_flags & ITEM_CAS we have 8 bytes CAS */
-    /* then null-terminated key */
-    /* then " flags length\r\n" (no terminating null) */
-    /* then data with terminating \r\n (no terminating null; it's binary!) */
-} item;
+
 
 // TODO: If we eventually want user loaded modules, we can't use an enum :(
 enum crawler_run_type {
@@ -800,3 +924,20 @@ extern void drop_worker_privileges(void);
 
 #define likely(x)       __builtin_expect((x),1)
 #define unlikely(x)     __builtin_expect((x),0)
+
+
+/*item_bdb headers*/
+void item_init_bdb(void);
+item *do_item_from_freelist_bdb(void);
+int do_item_add_to_freelist_bdb(item *it);
+item *item_alloc1_bdb(char *key, const size_t nkey, const int flags, const int nbytes);
+item *item_alloc2_bdb(size_t ntotal);
+int item_free_bdb(item *it);
+item *item_get_bdb(char *key, size_t nkey);
+int item_put_bdb(char *key, size_t nkey, item *it);
+int item_delete_bdb(char *key, size_t nkey);
+int item_exists_bdb(char *key, size_t nkey);
+item *item_cget_bdb(DBC *cursorp, char *start, size_t nstart, u_int32_t flags);
+
+# define item_from_freelist_bdb()         do_item_from_freelist_bdb()
+# define item_add_to_freelist_bdb(x)      do_item_add_to_freelist_bdb(x)
