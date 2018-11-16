@@ -236,11 +236,13 @@ item *item_get_bdb(char *key, size_t nkey){
                 stop = true;
                 item_free(it);
                 it = NULL;
+                fprintf(stderr,"did not retrieve item");
                 if (settings_bdb.verbose > 1) {
                     fprintf(stderr, "dbp->get: %s\n", db_strerror(ret));
                 }
         }
     }
+    fprintf(stderr,"returning item");
     return it;
 }
 

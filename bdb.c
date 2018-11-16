@@ -37,27 +37,37 @@ static pthread_t dld_ptid;
 
 void bdb_settings_init(void)
 {
-    bdb_settings.db_file = DBFILE;
-    bdb_settings.env_home = DBHOME;
+    bdb_settings.db_file = NULL;
+    bdb_settings.env_home = NULL;
     bdb_settings.log_home = NULL;
+
     bdb_settings.cache_size = 256 * 1024 * 1024; /* default is 256MB */
-    bdb_settings.txn_lg_bsize = 4 * 1024 * 1024; /* default is 4MB */
+
+//    bdb_settings.txn_lg_bsize = 4 * 1024 * 1024; /* default is 4MB */
     bdb_settings.page_size = 4096;  /* default is 4K */
     bdb_settings.db_type = DB_HASH;
-    bdb_settings.txn_nosync = 0; /* default DB_TXN_NOSYNC is off */
-    bdb_settings.log_auto_remove = 0; /* default DB_LOG_AUTO_REMOVE is off */
-    bdb_settings.dldetect_val = 100 * 1000; /* default is 100 millisecond */
-    bdb_settings.chkpoint_val = 60 * 5;
-    bdb_settings.memp_trickle_val = 30;
-    bdb_settings.memp_trickle_percent = 60;
-    bdb_settings.db_flags = DB_CREATE | DB_AUTO_COMMIT;
-    bdb_settings.env_flags = DB_CREATE
-                             | DB_INIT_LOCK
-                             | DB_THREAD
-                             | DB_INIT_MPOOL
-                             | DB_INIT_LOG
-                             | DB_INIT_TXN
-                             | DB_RECOVER;
+//    bdb_settings.txn_nosync = 0; /* default DB_TXN_NOSYNC is off */
+//    bdb_settings.log_auto_remove = 0; /* default DB_LOG_AUTO_REMOVE is off */
+//    bdb_settings.dldetect_val = 100 * 1000; /* default is 100 millisecond */
+//    bdb_settings.chkpoint_val = 60 * 5;
+//    bdb_settings.memp_trickle_val = 30;
+//    bdb_settings.memp_trickle_percent = 60;
+
+    bdb_settings.db_flags = DB_CREATE;// | DB_AUTO_COMMIT;
+//    bdb_settings.env_flags = DB_CREATE
+//                             | DB_INIT_LOCK
+//                             | DB_THREAD
+//                             | DB_INIT_MPOOL
+//                             | DB_INIT_LOG
+//                             | DB_INIT_TXN
+//                             | DB_RECOVER;
+
+    bdb_settings.env_flags =
+            DB_CREATE     |  /* Create the environment if it does not exist */
+            DB_INIT_MPOOL |  /* Initialize the memory pool (in-memory cache) */
+            DB_PRIVATE;
+
+
 
     bdb_settings.is_replicated = 0;
     bdb_settings.rep_localhost = "127.0.0.1"; /* local host in replication */
@@ -128,17 +138,17 @@ void bdb_env_init(void){
         }
     }
 
-    /* set log dir*/
-    if (bdb_settings.log_home != NULL){
-        /* if no log dir existed, we create it */
-        if (0 != access(bdb_settings.log_home, F_OK)) {
-            if (0 != mkdir(bdb_settings.log_home, 0750)) {
-                fprintf(stderr, "mkdir log_home error:[%s]\n", bdb_settings.log_home);
-                exit(EXIT_FAILURE);
-            }
-        }
-        env->set_lg_dir(env, bdb_settings.log_home);
-    }
+//    /* set log dir*/
+//    if (bdb_settings.log_home != NULL){
+//        /* if no log dir existed, we create it */
+//        if (0 != access(bdb_settings.log_home, F_OK)) {
+//            if (0 != mkdir(bdb_settings.log_home, 0750)) {
+//                fprintf(stderr, "mkdir log_home error:[%s]\n", bdb_settings.log_home);
+//                exit(EXIT_FAILURE);
+//            }
+//        }
+//        env->set_lg_dir(env, bdb_settings.log_home);
+//    }
 
     /* set MPOOL size */
     if (sizeof(void *) == 4 && bdb_settings.cache_size > (1024uLL * 1024uLL * 1024uLL * 2uLL)) {
@@ -150,20 +160,20 @@ void bdb_env_init(void){
                        (int) (bdb_settings.cache_size / (1024uLL * 1024uLL * 1024uLL * 4uLL) + 1uLL) );
 
     /* set DB_TXN_NOSYNC flag */
-    if (bdb_settings.txn_nosync){
-        env->set_flags(env, DB_TXN_NOSYNC, 1);
-    }
+//    if (bdb_settings.txn_nosync){
+//        env->set_flags(env, DB_TXN_NOSYNC, 1);
+//    }
 
-    /* set locking */
-    env->set_lk_max_lockers(env, 20000);
-    env->set_lk_max_locks(env, 20000);
-    env->set_lk_max_objects(env, 20000);
-
-    /* at least max active transactions */
-    env->set_tx_max(env, 10000);
-
-    /* set transaction log buffer */
-    env->set_lg_bsize(env, bdb_settings.txn_lg_bsize);
+//    /* set locking */
+//    env->set_lk_max_lockers(env, 20000);
+//    env->set_lk_max_locks(env, 20000);
+//    env->set_lk_max_objects(env, 20000);
+//
+//    /* at least max active transactions */
+//    env->set_tx_max(env, 10000);
+//
+//    /* set transaction log buffer */
+//    env->set_lg_bsize(env, bdb_settings.txn_lg_bsize);
 
     /* NOTICE:
     If set, Berkeley DB will automatically remove log files that are no longer needed.
@@ -178,12 +188,12 @@ void bdb_env_init(void){
     }
 
     /* if no home dir existed, we create it */
-    if (0 != access(bdb_settings.env_home, F_OK)) {
-        if (0 != mkdir(bdb_settings.env_home, 0750)) {
-            fprintf(stderr, "mkdir env_home error:[%s]\n", bdb_settings.env_home);
-            exit(EXIT_FAILURE);
-        }
-    }
+//    if (0 != access(bdb_settings.env_home, F_OK)) {
+//        if (0 != mkdir(bdb_settings.env_home, 0750)) {
+//            fprintf(stderr, "mkdir env_home error:[%s]\n", bdb_settings.env_home);
+//            exit(EXIT_FAILURE);
+//        }
+//    }
 
     if(bdb_settings.is_replicated) {
         bdb_settings.env_flags |= DB_INIT_REP;

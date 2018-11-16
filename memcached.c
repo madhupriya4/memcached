@@ -235,7 +235,7 @@ static void settings_init(void) {
     settings.inter = NULL;
     settings.maxbytes = 64 * 1024 * 1024; /* default is 64MB */
     settings.maxconns = 1024;         /* to limit connections-related memory to about 5MB */
-    settings.verbose = 0;
+    settings.verbose = 1;
     settings.oldest_live = 0;
     settings.oldest_cas = 0;          /* supplements accuracy of oldest_live */
     settings.evict_to_free = 1;       /* push old items out of cache when memory runs out */
@@ -975,12 +975,16 @@ static int ensure_iov_space(conn *c) {
  */
 
 static int add_iov(conn *c, const void *buf, int len) {
+
+    fprintf(stderr, "in add iov\n");
     struct msghdr *m;
     int leftover;
 
     assert(c != NULL);
 
     if (IS_UDP(c->transport)) {
+
+        fprintf(stderr, "\nin the UDP block\n");
         do {
             m = &c->msglist[c->msgused - 1];
 
@@ -1019,6 +1023,8 @@ static int add_iov(conn *c, const void *buf, int len) {
         } while (leftover > 0);
     } else {
         /* Optimized path for TCP connections */
+        fprintf(stderr, "\nin the TCP block\n");
+
         m = &c->msglist[c->msgused - 1];
         if (m->msg_iovlen == IOV_MAX) {
             add_msghdr(c);
@@ -1026,15 +1032,21 @@ static int add_iov(conn *c, const void *buf, int len) {
         }
 
         if (ensure_iov_space(c) != 0)
+        {
+            fprintf(stderr, "\nnot enough iov space\n");
             return -1;
+        }
 
         m->msg_iov[m->msg_iovlen].iov_base = (void *)buf;
         m->msg_iov[m->msg_iovlen].iov_len = len;
         c->msgbytes += len;
+        fprintf(stderr, "\nc->msgbytes=%d\n",c->msgbytes);
         c->iovused++;
         m->msg_iovlen++;
+        fprintf(stderr, "\n m->msg_iovlen=%zu\n",m->msg_iovlen);
     }
 
+    fprintf(stderr,"add iov returning \n");
     return 0;
 }
 
@@ -2827,6 +2839,9 @@ static void complete_nread(conn *c) {
  * Returns the state of storage.
  */
 enum store_item_type do_store_item(item *it, int comm, conn *c, const uint32_t hv) {
+
+
+
 //    char *key = ITEM_key(it);
 //    item *old_it = do_item_get(key, it->nkey, hv, c, DONT_UPDATE);
 //    enum store_item_type stored = NOT_STORED;
@@ -3874,7 +3889,7 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
     int si = 0;
     item *it;
     token_t *key_token = &tokens[KEY_TOKEN];
-//    char *suffix;
+    char *suffix;
     int32_t exptime_int = 0;
 //    rel_time_t exptime = 0;
     bool fail_length = false;
@@ -4059,11 +4074,16 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
             }
 
 //            stats_get_cmds++;
-
+            fprintf(stderr,"trying to get key:%s,%zu\n",key,nkey);
             it = item_get_bdb(key, nkey);
 
             if (it) {
+
+                fprintf(stderr, "item is not null \n");
                 if (i >= c->isize) {
+
+
+                    fprintf(stderr, "i >= c->isize\n");
                     item **new_list = realloc(c->ilist, sizeof(item *) * c->isize * 2);
                     if (new_list) {
                         c->isize *= 2;
@@ -4083,20 +4103,113 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
                  *   " " + flags + " " + data length + "\r\n" + data (with \r\n)
                  */
 
-                if (add_iov(c, "VALUE ", 6) != 0 ||
-                    add_iov(c, ITEM_key(it), it->nkey) != 0 ||
-                    add_iov(c, ITEM_suffix(it), it->nsuffix + it->nbytes) != 0)
+                fprintf(stderr, "\n\nitem data=%s\n", ITEM_data(it));
+
+//
+//                if (add_iov(c, "VALUE ", 6) != 0 || add_iov(c, ITEM_key(it), it->nkey) != 0
+//                || add_iov(c, ITEM_key(it), it->nkey) != 0
+//                || add_iov(c, ITEM_suffix(it), it->nsuffix + it->nbytes) != 0)
+//                {
+//
+//                    //fprintf(stderr," add iov VALUE done\n");
+//
+//                        {
+//
+//                            //fprintf(stderr," add key nkey done\n");
+//                            //if(add_iov(c, ITEM_suffix(it), it->nsuffix + it->nbytes) != 0)
+//                            {
+//
+//                                fprintf(stderr," ITEM_suffix(it), it->nsuffix + it->nbytes\n");
+//                                item_free(it);
+//                                it = NULL;
+//                                fprintf(stderr,"\nItem suffix=%s\n\n",ITEM_suffix(it));
+//                                break;
+//                            }
+//                        }
+//                }
+
+
+                if (return_cas || !settings.inline_ascii_response)
                 {
-                    item_free(it);
-                    it = NULL;
-                    break;
+                  MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
+                                        it->nbytes, ITEM_get_cas(it));
+                  int nbytes;
+                  suffix = _ascii_get_suffix_buf(c, si);
+                  if (suffix == NULL) {
+                      item_remove(it);
+                      //goto stop;
+                      break;
+                  }
+                  si++;
+                  nbytes = it->nbytes;
+                  int suffix_len = make_ascii_get_suffix(suffix, it, return_cas, nbytes);
+                  if (add_iov(c, "VALUE ", 6) != 0 ||
+                      add_iov(c, ITEM_key(it), it->nkey) != 0 ||
+                      (settings.inline_ascii_response && add_iov(c, ITEM_suffix(it), it->nsuffix - 2) != 0) ||
+                      add_iov(c, suffix, suffix_len) != 0)
+                      {
+                          item_remove(it);
+                          //goto stop;
+                          break;
+                      }
+#ifdef EXTSTORE
+                  if (it->it_flags & ITEM_HDR) {
+                      if (_get_extstore(c, it, c->iovused-3, 4) != 0) {
+                          pthread_mutex_lock(&c->thread->stats.mutex);
+                          c->thread->stats.get_oom_extstore++;
+                          pthread_mutex_unlock(&c->thread->stats.mutex);
+
+                          item_remove(it);
+                          //goto stop;
+                          break;
+                      }
+                  } else if ((it->it_flags & ITEM_CHUNKED) == 0) {
+#else
+                  if ((it->it_flags & ITEM_CHUNKED) == 0) {
+#endif
+                      add_iov(c, ITEM_data(it), it->nbytes);
+                  } else if (add_chunked_item_iovs(c, it, it->nbytes) != 0) {
+                      item_remove(it);
+                      //goto stop;
+                      break;
+                  }
                 }
+                else
+                {
+                  MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
+                                        it->nbytes, ITEM_get_cas(it));
+                  if (add_iov(c, "VALUE ", 6) != 0 ||
+                      add_iov(c, ITEM_key(it), it->nkey) != 0)
+                      {
+                          item_remove(it);
+//                          goto stop;
+                            break;
+                      }
+                  if ((it->it_flags & ITEM_CHUNKED) == 0)
+                      {
+                          if (add_iov(c, ITEM_suffix(it), it->nsuffix + it->nbytes) != 0)
+                          {
+                              item_remove(it);
+                              break;
+                              //goto stop;
+                          }
+                      } else if (add_iov(c, ITEM_suffix(it), it->nsuffix) != 0 ||
+                                 add_chunked_item_iovs(c, it, it->nbytes) != 0) {
+                          item_remove(it);
+                          break;
+                          //goto stop;
+                      }
+                }
+
+
+
 
                 if (settings.verbose > 1)
                     fprintf(stderr, ">%d sending key %s\n", c->sfd, ITEM_key(it));
 
 //                stats_get_hits++;
                 *(c->ilist + i) = it;
+                fprintf(stderr, "\n\ncopied data=%s\n", ITEM_data(*(c->ilist + i)));
                 i++;
 
             } else {
@@ -4145,6 +4258,8 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
         conn_release_items(c);
     }
     else {
+
+
         conn_set_state(c, conn_mwrite);
         c->msgcurr = 0;
     }
@@ -4797,6 +4912,7 @@ static void process_command(conn *c, char *command) {
          (strcmp(tokens[COMMAND_TOKEN].value, "bget") == 0))) {
 
         process_get_command(c, tokens, ntokens, false, false);
+        fprintf(stderr,"process get command done\n");
 
     } else if ((ntokens == 6 || ntokens == 7) &&
                ((strcmp(tokens[COMMAND_TOKEN].value, "add") == 0 && (comm = NREAD_ADD)) ||
@@ -5096,6 +5212,7 @@ static int try_read_command(conn *c) {
         if (settings.verbose > 1) {
             fprintf(stderr, "%d: Client using the %s protocol\n", c->sfd,
                     prot_text(c->protocol));
+
         }
     }
 
@@ -5210,6 +5327,7 @@ static int try_read_command(conn *c) {
         assert(c->rcurr <= (c->rbuf + c->rsize));
     }
 
+    fprintf(stderr,"try read command done\n");
     return 1;
 }
 
@@ -6700,6 +6818,8 @@ static bool _parse_slab_sizes(char *s, uint32_t *slab_sizes) {
 }
 
 int main (int argc, char **argv) {
+
+    settings_bdb.verbose=1;
     int c;
     bool lock_memory = false;
     bool do_daemonize = false;
