@@ -37,6 +37,11 @@ static pthread_t dld_ptid;
 
 void bdb_settings_init(void)
 {
+
+//    initialize bdb queue here
+
+
+
     bdb_settings.db_file = NULL;
     bdb_settings.env_home = NULL;
     bdb_settings.log_home = NULL;

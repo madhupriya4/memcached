@@ -4580,7 +4580,7 @@ enum delta_result_type do_add_delta(conn *c, const char *key, const size_t nkey,
 static void process_delete_command(conn *c, token_t *tokens, const size_t ntokens) {
     char *key;
     size_t nkey;
-    item *it;
+//    item *it;
 
     assert(c != NULL);
 
@@ -4605,29 +4605,46 @@ static void process_delete_command(conn *c, token_t *tokens, const size_t ntoken
         return;
     }
 
-    if (settings.detail_enabled) {
-        stats_prefix_record_delete(key, nkey);
+//    if (settings.detail_enabled) {
+//        stats_prefix_record_delete(key, nkey);
+//    }
+//
+//    it = item_get(key, nkey, c, DONT_UPDATE);
+//    if (it) {
+//        MEMCACHED_COMMAND_DELETE(c->sfd, ITEM_key(it), it->nkey);
+//
+//        pthread_mutex_lock(&c->thread->stats.mutex);
+//        c->thread->stats.slab_stats[ITEM_clsid(it)].delete_hits++;
+//        pthread_mutex_unlock(&c->thread->stats.mutex);
+//
+//        item_unlink(it);
+//        STORAGE_delete(c->thread->storage, it);
+//        item_remove(it);      /* release our reference */
+//        out_string(c, "DELETED");
+//    } else {
+//        pthread_mutex_lock(&c->thread->stats.mutex);
+//        c->thread->stats.delete_misses++;
+//        pthread_mutex_unlock(&c->thread->stats.mutex);
+//
+//        out_string(c, "NOT_FOUND");
+//    }
+
+    int ret;
+    switch (ret = item_delete_bdb(key, nkey)) {
+        case 0:
+            out_string(c, "DELETED");
+            break;
+        case 1:
+            out_string(c, "NOT_FOUND");
+            break;
+        case -1:
+            out_string(c, "SERVER_ERROR while delete a item");
+            break;
+        default:
+            out_string(c, "SERVER_ERROR nothing to do");
     }
+    return;
 
-    it = item_get(key, nkey, c, DONT_UPDATE);
-    if (it) {
-        MEMCACHED_COMMAND_DELETE(c->sfd, ITEM_key(it), it->nkey);
-
-        pthread_mutex_lock(&c->thread->stats.mutex);
-        c->thread->stats.slab_stats[ITEM_clsid(it)].delete_hits++;
-        pthread_mutex_unlock(&c->thread->stats.mutex);
-
-        item_unlink(it);
-        STORAGE_delete(c->thread->storage, it);
-        item_remove(it);      /* release our reference */
-        out_string(c, "DELETED");
-    } else {
-        pthread_mutex_lock(&c->thread->stats.mutex);
-        c->thread->stats.delete_misses++;
-        pthread_mutex_unlock(&c->thread->stats.mutex);
-
-        out_string(c, "NOT_FOUND");
-    }
 }
 
 static void process_verbosity_command(conn *c, token_t *tokens, const size_t ntokens) {

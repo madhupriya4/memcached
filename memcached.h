@@ -941,3 +941,39 @@ item *item_cget_bdb(DBC *cursorp, char *start, size_t nstart, u_int32_t flags);
 
 # define item_from_freelist_bdb()         do_item_from_freelist_bdb()
 # define item_add_to_freelist_bdb(x)      do_item_add_to_freelist_bdb(x)
+
+
+/*lru changes*/
+
+// A Queue Node (Queue is implemented using Doubly Linked List)
+//typedef struct bdb_node
+//{
+//    struct bdb_node *prev, *next;
+//    char * key;
+//    size_t size;
+//} bdb_node;
+//
+//// A Queue (A FIFO collection of Queue Nodes)
+//typedef struct BDBQueue
+//{
+//    size_t cur_filled_size;
+//    bdb_node *front, *rear;
+//} BDBQueue;
+//
+//// A hash (Collection of pointers to Queue Nodes)
+////typedef struct bdb_queue_hash
+////{
+//////    int capacity; // how many pages can be there
+////    bdb_node* *array; // an array of queue nodes
+////} bdb_queue_hash;
+//
+//
+//
+//bdb_node* newbdb_node(char * key);
+//BDBQueue* createQueue( int numberOfFrames );
+////bdb_queue_hash* createHash( int capacity );
+//int AreAllFramesFull( BDBQueue* queue );
+//int isQueueEmpty( BDBQueue* queue );
+//void deQueue( BDBQueue* queue );
+//void Enqueue( BDBQueue* queue, char * key );
+//void ReferencePage( BDBQueue* queue, char * key );

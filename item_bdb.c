@@ -189,12 +189,14 @@ int item_free_bdb(item *it) {
 
 /* if return item is not NULL, free by caller */
 item *item_get_bdb(char *key, size_t nkey){
+    fprintf(stderr,"inside item_get_bdb\n");
     item *it = NULL;
     DBT dbkey, dbdata;
     bool stop;
     int ret;
 
     /* first, alloc a fixed size */
+
     it = item_alloc2_bdb(settings_bdb.item_buf_size);
     if (it == 0) {
         return NULL;
@@ -208,33 +210,37 @@ item *item_get_bdb(char *key, size_t nkey){
     dbdata.flags = DB_DBT_USERMEM;
 
     stop = false;
+    fprintf(stderr,"try to get a item from bdb\n");
     /* try to get a item from bdb */
     while (!stop) {
         switch (ret = dbp->get(dbp, NULL, &dbkey, &dbdata, 0)) {
             case DB_BUFFER_SMALL:    /* user mem small */
+                fprintf(stderr,"buffer too small, increasing it's size\n");
                 /* free the original smaller buffer */
-                item_free(it);
+                item_free_bdb(it);
                 /* alloc the correct size */
                 it = item_alloc2_bdb(dbdata.size);
                 if (it == NULL) {
                     return NULL;
                 }
+
                 dbdata.ulen = dbdata.size;
                 dbdata.data = it;
-                break;
+                continue;
             case 0:                  /* Success. */
                 stop = true;
                 break;
             case DB_NOTFOUND:
                 stop = true;
-                item_free(it);
+                item_free_bdb(it);
                 it = NULL;
                 break;
             default:
                 /* TODO: may cause bug here, if return DB_BUFFER_SMALL then retun non-zero again
                  * here 'it' may not a full one. a item buffer larger than item_buf_size may be added to freelist */
                 stop = true;
-                item_free(it);
+                fprintf(stderr,"in the default condition of item_get_bdb\n");
+                item_free_bdb(it);
                 it = NULL;
                 fprintf(stderr,"did not retrieve item");
                 if (settings_bdb.verbose > 1) {
@@ -242,7 +248,8 @@ item *item_get_bdb(char *key, size_t nkey){
                 }
         }
     }
-    fprintf(stderr,"returning item");
+    if(it)
+        fprintf(stderr,"returning item%s",ITEM_suffix(it));
     return it;
 }
 
