@@ -137,6 +137,9 @@ void *ext_storage;
 struct settings_bdb settings_bdb;
 struct bdb_settings bdb_settings;
 struct bdb_version bdb_version;
+lruc *cache;
+
+
 DB_ENV *env;
 DB *dbp;
 
@@ -227,6 +230,11 @@ static void stats_reset(void) {
 }
 
 static void settings_init(void) {
+
+
+    cache = lruc_new(CACHE_SIZE, AVG_SIZE);
+
+
     settings.use_cas = true;
     settings.access = 0700;
     settings.port = 11211;

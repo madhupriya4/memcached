@@ -35,18 +35,20 @@ static pthread_t chk_ptid;
 static pthread_t mtri_ptid;
 static pthread_t dld_ptid;
 
+
+
 void bdb_settings_init(void)
 {
 
+
+
 //    initialize bdb queue here
-
-
-
     bdb_settings.db_file = NULL;
     bdb_settings.env_home = NULL;
     bdb_settings.log_home = NULL;
 
-    bdb_settings.cache_size = 256 * 1024 * 1024; /* default is 256MB */
+//    bdb_settings.cache_size = 256 * 1024 * 1024; /* default is 256MB */
+    bdb_settings.cache_size = CACHE_SIZE;
 
 //    bdb_settings.txn_lg_bsize = 4 * 1024 * 1024; /* default is 4MB */
     bdb_settings.page_size = 4096;  /* default is 4K */
