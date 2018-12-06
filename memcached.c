@@ -137,11 +137,13 @@ void *ext_storage;
 struct settings_bdb settings_bdb;
 struct bdb_settings bdb_settings;
 struct bdb_version bdb_version;
-lruc *cache;
 
 
 DB_ENV *env;
 DB *dbp;
+DB_MPOOLFILE *mpf;
+struct Queue* lruQueue;
+
 
 int daemon_quit = 0;
 
@@ -231,9 +233,7 @@ static void stats_reset(void) {
 
 static void settings_init(void) {
 
-
-    cache = lruc_new(CACHE_SIZE, AVG_SIZE);
-
+    lruQueue=createQueue();
 
     settings.use_cas = true;
     settings.access = 0700;
@@ -3014,13 +3014,19 @@ enum store_item_type do_store_item(item *it, int comm, conn *c, const uint32_t h
     ret = item_put_bdb(key, strlen(key), it);
 
     if (old_it != NULL)
+    {
         item_free_bdb(old_it);
+    }
+
+
     if (new_it != NULL)
         item_free_bdb(new_it);
 
     if (ret  == 0) {
+
         return 1;
-    } else {
+    }
+    else {
         return 0;
     }
 }
@@ -8127,7 +8133,7 @@ int main (int argc, char **argv) {
 
     stop_assoc_maintenance_thread();
 
-    /* cleanup bdb staff */
+    /* cleanup bdb stuff */
     fprintf(stderr, "try to clean up bdb resource...\n");
     bdb_chkpoint();
     bdb_db_close();

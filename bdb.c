@@ -40,7 +40,7 @@ static pthread_t dld_ptid;
 void bdb_settings_init(void)
 {
 
-
+    mpf = NULL;
 
 //    initialize bdb queue here
     bdb_settings.db_file = NULL;
@@ -48,7 +48,7 @@ void bdb_settings_init(void)
     bdb_settings.log_home = NULL;
 
 //    bdb_settings.cache_size = 256 * 1024 * 1024; /* default is 256MB */
-    bdb_settings.cache_size = CACHE_SIZE;
+    bdb_settings.cache_size=CACHE_SIZE;
 
 //    bdb_settings.txn_lg_bsize = 4 * 1024 * 1024; /* default is 4MB */
     bdb_settings.page_size = 4096;  /* default is 4K */
@@ -337,7 +337,17 @@ void bdb_db_open(void){
                 fprintf(stderr, "db_open: %s\n", db_strerror(ret));
                 exit(EXIT_FAILURE);
         }
+
     }
+    mpf = dbp->get_mpf(dbp);
+    ret = mpf->set_flags(mpf, DB_MPOOL_NOFILE, 1);
+
+    if (ret != 0) {
+        fprintf(stderr,"Attempt failed to configure for no backing of temp files.");
+
+    }
+
+
 
 }
 

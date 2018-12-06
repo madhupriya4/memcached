@@ -175,6 +175,7 @@ void stats_repms(char *temp);
 
 extern DB_ENV *env;
 extern DB *dbp;
+extern DB_MPOOLFILE *mpf;
 
 extern int daemon_quit;
 
@@ -945,58 +946,92 @@ item *item_cget_bdb(DBC *cursorp, char *start, size_t nstart, u_int32_t flags);
 
 /*lru changes*/
 
+
+// A linked list (LL) node to store a queue entry
+struct QNode
+{
+    char * key;
+    uint8_t keyLength;
+    int valueLength;
+    struct QNode *next;
+};
+
+// The queue, front stores the front node of LL and rear stores ths
+// last node of LL
+struct Queue
+{
+    struct QNode *front, *rear;
+    size_t curSize;
+};
+
+struct Queue* createQueue(void);
+struct QNode* newNode(char * key,uint8_t keyLength,int valueLength);
+void enQueue(struct Queue *q, char * key,uint8_t keyLength,int valueLength);
+struct QNode* deQueue(struct Queue *q);
+struct QNode*  keyNodePointer(struct Queue *q, char * key);
+void ReferencePage(struct Queue *queue, char * key, uint8_t keyLength,int valueLength);
+void printQueue(struct Queue *queue);
+void deleteKey(struct Queue *queue, char * key);
+
+extern struct Queue* lruQueue;
+
+
+
 #define CACHE_SIZE  (8 * 1024)  // 8k
-#define AVG_SIZE    (2 * 1024)  // 2k
-
-// ------------------------------------------
-// errors
-// ------------------------------------------
-typedef enum {
-    LRUC_NO_ERROR = 0,
-    LRUC_MISSING_CACHE,
-    LRUC_MISSING_KEY,
-    LRUC_PTHREAD_ERROR,
-    LRUC_VALUE_TOO_LARGE
-} lruc_error;
 
 
-// ------------------------------------------
-// types
-// ------------------------------------------
-typedef  struct str_lruc_item{
-    void      *key;
-    uint32_t  value_length;
-    uint32_t  key_length;
-    uint64_t  access_count;
-    void      *next;
-}lruc_item;
 
-
-typedef  struct str_lruc{
-    lruc_item **items;
-    uint64_t  access_count;
-    uint64_t  free_memory;
-    uint64_t  total_memory;
-    uint64_t  average_item_length;
-    uint32_t  hash_table_size;
-    time_t    seed;
-    lruc_item *free_items;
-    pthread_mutex_t *mutex;
-}lruc;
-
-
-// ------------------------------------------
-// api
-// ------------------------------------------
-lruc *lruc_new(uint64_t cache_size, uint32_t average_length);
-lruc_error lruc_free(lruc *cache);
-lruc_error lruc_set(lruc *cache, void *key, uint32_t key_length, uint32_t value_length);
-lruc_error lruc_get(lruc *cache, void *key, uint32_t key_length);
-lruc_error lruc_delete(lruc *cache, void *key, uint32_t key_length);
-
-//helper functions
-uint32_t lruc_hash(lruc *cache, void *key, uint32_t key_length);
-int lruc_cmp_keys(lruc_item *item, void *key, uint32_t key_length);
-void lruc_remove_item(lruc *cache, lruc_item *prev, lruc_item *item, uint32_t hash_index);
-void lruc_remove_lru_item(lruc *cache);
-lruc_item *lruc_pop_or_create_item(lruc *cache);
+//#define AVG_SIZE    (2 * 1024)  // 2k
+//
+//// ------------------------------------------
+//// errors
+//// ------------------------------------------
+//typedef enum {
+//    LRUC_NO_ERROR = 0,
+//    LRUC_MISSING_CACHE,
+//    LRUC_MISSING_KEY,
+//    LRUC_PTHREAD_ERROR,
+//    LRUC_VALUE_TOO_LARGE
+//} lruc_error;
+//
+//
+//// ------------------------------------------
+//// types
+//// ------------------------------------------
+//typedef  struct str_lruc_item{
+//    void      *key;
+//    uint32_t  value_length;
+//    uint32_t  key_length;
+//    uint64_t  access_count;
+//    void      *next;
+//}lruc_item;
+//
+//
+//typedef  struct str_lruc{
+//    lruc_item **items;
+//    uint64_t  access_count;
+//    uint64_t  free_memory;
+//    uint64_t  total_memory;
+//    uint64_t  average_item_length;
+//    uint32_t  hash_table_size;
+//    time_t    seed;
+//    lruc_item *free_items;
+//    pthread_mutex_t *mutex;
+//}lruc;
+//
+//
+//// ------------------------------------------
+//// api
+//// ------------------------------------------
+//lruc *lruc_new(uint64_t cache_size, uint32_t average_length);
+//lruc_error lruc_free(lruc *cache);
+//lruc_error lruc_set(lruc *cache, void *key, uint32_t key_length, uint32_t value_length);
+//lruc_error lruc_get(lruc *cache, void *key, uint32_t key_length);
+//lruc_error lruc_delete(lruc *cache, void *key, uint32_t key_length);
+//
+////helper functions
+//uint32_t lruc_hash(lruc *cache, void *key, uint32_t key_length);
+//int lruc_cmp_keys(lruc_item *item, void *key, uint32_t key_length);
+//void lruc_remove_item(lruc *cache, lruc_item *prev, lruc_item *item, uint32_t hash_index);
+//void lruc_remove_lru_item(lruc *cache);
+//lruc_item *lruc_pop_or_create_item(lruc *cache);

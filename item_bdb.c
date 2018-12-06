@@ -229,6 +229,8 @@ item *item_get_bdb(char *key, size_t nkey){
                 continue;
             case 0:                  /* Success. */
                 stop = true;
+                ReferencePage(lruQueue,key,nkey,it->nbytes);
+                printQueue(lruQueue);
                 break;
             case DB_NOTFOUND:
                 stop = true;
@@ -329,14 +331,56 @@ int item_put_bdb(char *key, size_t nkey, item *it){
     dbkey.size = nkey;
     dbdata.data = it;
     dbdata.size = ITEM_ntotal(it);
-    ret = dbp->put(dbp, NULL, &dbkey, &dbdata, 0);
-    if (ret == 0) {
-        return 0;
-    } else {
-        if (settings_bdb.verbose > 1) {
-            fprintf(stderr, "dbp->put: %s\n", db_strerror(ret));
+
+    insertCode:
+    switch (ret = dbp->put(dbp, NULL, &dbkey, &dbdata, 0))
+    {
+        case 0:
+        {
+            fprintf(stderr,"ret = 0 ");
+            ReferencePage(lruQueue,key,nkey,it->nbytes);
+            printQueue(lruQueue);
+            return 0;
         }
-        return -1;
+        case ENOMEM:
+        {
+            fprintf(stderr,"no memory");
+            int reqSize=ITEM_ntotal(it)*2;
+            int curSize=0;
+            while(curSize<reqSize)
+            {
+                struct QNode * temp=deQueue(lruQueue);
+                curSize+=temp->keyLength+temp->valueLength;
+
+                DBT dbkeyTemp;
+
+                BDB_CLEANUP_DBT();
+                dbkeyTemp.data = temp->key;
+                dbkeyTemp.size = temp->keyLength;
+                ret = dbp->del(dbp, NULL, &dbkeyTemp, 0);
+                if (ret == 0){
+                    ;
+                }else if(ret == DB_NOTFOUND){
+                    return 1;
+                }else{
+                    if (settings_bdb.verbose > 1) {
+                        fprintf(stderr, "dbp->del: %s\n", db_strerror(ret));
+                    }
+                    return -1;
+                }
+                printQueue(lruQueue);
+            }
+            goto insertCode;
+
+            return  0;
+        }
+        default: {
+
+            if (settings_bdb.verbose > 1) {
+                fprintf(stderr, "dbp->put: %s\n", db_strerror(ret));
+            }
+            return -1;
+        }
     }
 }
 
@@ -353,6 +397,9 @@ int item_delete_bdb(char *key, size_t nkey){
     dbkey.size = nkey;
     ret = dbp->del(dbp, NULL, &dbkey, 0);
     if (ret == 0){
+        deleteKey(lruQueue,key);
+        printQueue(lruQueue);
+        fprintf(stderr,"printed lru queue\n");
         return 0;
     }else if(ret == DB_NOTFOUND){
         return 1;

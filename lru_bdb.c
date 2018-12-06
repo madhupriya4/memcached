@@ -1,7 +1,7 @@
-//
-// Created by madhupriya on 11/21/18.
-//
-//
+////
+//// Created by madhupriya on 11/21/18.
+////
+////
 
 #include "memcached.h"
 #include <stdlib.h>
@@ -9,411 +9,234 @@
 #include <stdio.h>
 #include <err.h>
 
-// ------------------------------------------
-// private functions
-// ------------------------------------------
-// MurmurHash2, by Austin Appleby
-// http://sites.google.com/site/murmurhash/
-uint32_t lruc_hash(lruc *cache, void *key, uint32_t key_length) {
-    uint32_t m = 0x5bd1e995;
-    uint32_t r = 24;
-    uint32_t h = cache->seed ^ key_length;
-    char* data = (char *)key;
 
-    while(key_length >= 4) {
-        uint32_t k = *(uint32_t *)data;
-        k *= m;
-        k ^= k >> r;
-        k *= m;
-        h *= m;
-        h ^= k;
-        data += 4;
-        key_length -= 4;
-    }
-
-    switch(key_length) {
-        case 3: h ^= data[2] << 16;
-        case 2: h ^= data[1] << 8;
-        case 1: h ^= data[0];
-            h *= m;
-    };
-
-    h ^= h >> 13;
-    h *= m;
-    h ^= h >> 15;
-    return h % cache->hash_table_size;
+// A utility function to create an empty queue
+struct Queue* createQueue(void)
+{
+    struct Queue *q = (struct Queue*)malloc(sizeof(struct Queue));
+    q->front = q->rear = NULL;
+    q->curSize=0;
+    return q;
+}
+// A utility function to create a new linked list node.
+struct QNode* newNode(char * key,uint8_t keyLength,int valueLength)
+{
+    struct QNode *temp = (struct QNode*)malloc(sizeof(struct QNode));
+    temp->key = (char * )malloc(keyLength* sizeof(char));
+//    for (int i=0; i<keyLength; i++)
+//        *(char *)(temp->key + i) = *(char *)(key + i);
+    strcpy(temp->key,key);
+    temp->keyLength=keyLength;
+    temp->valueLength=valueLength;
+    temp->next = NULL;
+    return temp;
 }
 
-// compare a key against an existing item's key
-int lruc_cmp_keys(lruc_item *item, void *key, uint32_t key_length) {
-    if(key_length != item->key_length)
-        return 1;
+// The function to add a key k to q
+void enQueue(struct Queue *q, char * key,uint8_t keyLength,int valueLength)
+{
+    // Create a new LL node
+    struct QNode *temp = newNode(key,keyLength,valueLength);
+    fprintf(stderr,"printing temp node's values:-\nkey=%s\nkey length=%ul\nvalue length=%d\n",key,keyLength,valueLength);
+
+    q->curSize+=(temp->valueLength+temp->keyLength);
+
+    // If queue is empty, then new node is front and rear both
+    if (q->rear == NULL)
+    {
+        q->front = q->rear = temp;
+        return;
+    }
+
+    // Add the new node at the end of queue and change rear
+    q->rear->next = temp;
+    q->rear = temp;
+
+    fprintf(stderr,"\ncur size=%zu \n",q->curSize);
+}
+
+// Function to remove a key from given queue q
+struct QNode *deQueue(struct Queue *q)
+{
+    // If queue is empty, return NULL.
+    if (q->front == NULL)
+        return NULL;
+
+    // Store previous front and move front one node ahead
+    struct QNode *temp = q->front;
+    q->curSize-=(temp->valueLength+temp->keyLength);
+    q->front = q->front->next;
+
+    // If front becomes NULL, then change rear also as NULL
+    if (q->front == NULL)
+        q->rear = NULL;
+    return temp;
+}
+
+struct QNode *  keyNodePointer(struct Queue *q, char * key)
+{
+
+    for(struct QNode *temp=q->front;temp!=NULL;temp=temp->next)
+        if (strcmp(temp->key, key) == 0)
+            return temp;
+
+    return NULL;
+
+}
+
+void deleteKey(struct Queue *queue, char * key)
+{
+    struct QNode* reqPage = keyNodePointer(queue, key);
+
+
+    if ( reqPage == NULL )
+        return;
+
+    else if (reqPage == queue->front && reqPage==queue->rear)
+    {
+        queue->front = queue->rear = NULL;
+        queue->curSize=0;
+        free(reqPage);
+    }
+    else if(reqPage == queue->front)
+    {
+        queue->front=queue->front->next;
+        free(reqPage);
+    }
     else
-        return memcmp(key, item->key, key_length);
-}
+    {
+        struct QNode* prev=queue->front;
+        while(prev->next!=reqPage)
+            prev=prev->next;
 
-// remove an item and push it to the free items queue
-void lruc_remove_item(lruc *cache, lruc_item *prev, lruc_item *item, uint32_t hash_index) {
-    if(prev)
-        prev->next = item->next;
-    else
-        cache->items[hash_index] = (lruc_item *) item->next;
-
-    // free memory and update the free memory counter
-    cache->free_memory += item->value_length;
-//    free(item->value);
-    free(item->key);
-
-    // push the item to the free items queue
-    memset(item, 0, sizeof(lruc_item));
-    item->next = cache->free_items;
-    cache->free_items = item;
-}
-
-// remove the least recently used item
-// TODO: we can optimise this by finding the n lru items, where n = required_space / average_length
-void lruc_remove_lru_item(lruc *cache) {
-    lruc_item *min_item = NULL, *min_prev = NULL;
-    lruc_item *item = NULL, *prev = NULL;
-    uint32_t i = 0, min_index = -1;
-    uint64_t min_access_count = -1;
-
-    for(; i < cache->hash_table_size; i++) {
-        item = cache->items[i];
-        prev = NULL;
-
-        while(item) {
-            if(item->access_count < min_access_count || min_access_count == -1) {
-                min_access_count = item->access_count;
-                min_item  = item;
-                min_prev  = prev;
-                min_index = i;
-            }
-            prev = item;
-            item = item->next;
+        if(reqPage==queue->rear)
+        {
+            prev->next=NULL;
+            queue->rear=prev;
+            free(reqPage);
         }
-    }
-
-    if(min_item)
-        lruc_remove_item(cache, min_prev, min_item, min_index);
-}
-
-// pop an existing item off the free queue, or create a new one
-lruc_item *lruc_pop_or_create_item(lruc *cache) {
-    lruc_item *item = NULL;
-
-    if(cache->free_items) {
-        item = cache->free_items;
-        cache->free_items = item->next;
-    } else {
-        item = (lruc_item *) calloc(sizeof(lruc_item), 1);
-    }
-
-    return item;
-}
-
-// error helpers
-#define error_for(conditions, error)  if(conditions) {return error;}
-#define test_for_missing_cache()      error_for(!cache, LRUC_MISSING_CACHE)
-#define test_for_missing_key()        error_for(!key || key_length == 0, LRUC_MISSING_KEY)
-//#define test_for_missing_value()      error_for(!value || value_length == 0, LRUC_MISSING_VALUE)
-//#define test_for_value_too_large()    error_for(value_length > cache->total_memory, LRUC_VALUE_TOO_LARGE)
-
-// lock helpers
-#define lock_cache()    if(pthread_mutex_lock(cache->mutex)) {\
-  perror("LRU Cache unable to obtain mutex lock");\
-  return LRUC_PTHREAD_ERROR;\
-}
-
-#define unlock_cache()  if(pthread_mutex_unlock(cache->mutex)) {\
-  perror("LRU Cache unable to release mutex lock");\
-  return LRUC_PTHREAD_ERROR;\
-}
-
-
-// ------------------------------------------
-// public api
-// ------------------------------------------
-lruc *lruc_new(uint64_t cache_size, uint32_t average_length) {
-    // create the cache
-    lruc *cache = (lruc *) calloc(sizeof(lruc), 1);
-    if(!cache) {
-        perror("LRU Cache unable to create cache object");
-        return NULL;
-    }
-    cache->hash_table_size      = cache_size / average_length;
-    cache->average_item_length  = average_length;
-    cache->free_memory          = cache_size;
-    cache->total_memory         = cache_size;
-    cache->seed                 = time(NULL);
-
-    // size the hash table to a guestimate of the number of slots required (assuming a perfect hash)
-    cache->items = (lruc_item **) calloc(sizeof(lruc_item *), cache->hash_table_size);
-    if(!cache->items) {
-        perror("LRU Cache unable to create cache hash table");
-        free(cache);
-        return NULL;
-    }
-
-    // all cache calls are guarded by a mutex
-    cache->mutex = (pthread_mutex_t *) malloc(sizeof(pthread_mutex_t));
-    if(pthread_mutex_init(cache->mutex, NULL)) {
-        perror("LRU Cache unable to initialise mutex");
-        free(cache->items);
-        free(cache);
-        return NULL;
-    }
-    return cache;
-}
-
-
-lruc_error lruc_free(lruc *cache) {
-    test_for_missing_cache();
-
-    // free each of the cached items, and the hash table
-    lruc_item *item = NULL, *next = NULL;
-    uint32_t i = 0;
-    if(cache->items) {
-        for(; i < cache->hash_table_size; i++) {
-            item = cache->items[i];
-            while(item) {
-                next = (lruc_item *) item->next;
-                free(item);
-                item = next;
-            }
+        else {
+            prev->next = reqPage->next;
+            free(reqPage);
         }
-        free(cache->items);
-    }
 
-    // free the cache
-    if(cache->mutex) {
-        if(pthread_mutex_destroy(cache->mutex)) {
-            perror("LRU Cache unable to destroy mutex");
-            return LRUC_PTHREAD_ERROR;
-        }
     }
-    free(cache);
-
-    return LRUC_NO_ERROR;
 }
 
+void ReferencePage(struct Queue *queue, char * key, uint8_t keyLength,int valueLength)
+{
+    struct QNode* reqPage = keyNodePointer(queue, key);
 
-lruc_error lruc_set(lruc *cache, void *key, uint32_t key_length, uint32_t value_length) {
-    test_for_missing_cache();
-    test_for_missing_key();
-//    test_for_missing_value();
-//    test_for_value_too_large();
-    lock_cache();
+    // the page is not in cache, bring it
+    if ( reqPage == NULL )
+        enQueue(queue,key,keyLength,valueLength);
 
-    // see if the key already exists
-    uint32_t hash_index = lruc_hash(cache, key, key_length), required = 0;
-    lruc_item *item = NULL, *prev = NULL;
-    item = cache->items[hash_index];
+        // page is there and not at front, change pointer
+    else if (reqPage != queue->front)
+    {
+        // Unlink rquested page from its current location
+        // in queue.
+        struct QNode* prev=queue->front;
+        while(prev->next!=reqPage)
+            prev=prev->next;
 
-    while(item && lruc_cmp_keys(item, key, key_length)) {
-        prev = item;
-        item = (lruc_item *) item->next;
+        prev->next = reqPage->next;
+        queue->rear->next=reqPage;
+        queue->rear=reqPage;
+        queue->rear->next=NULL;
+
     }
-
-    if(item) {
-        // update the value and value_lengths
-        required = value_length - item->value_length;
-//        free(item->value);
-//        item->value = value;
-        item->value_length = value_length;
-
-    } else {
-        // insert a new item
-        item = lruc_pop_or_create_item(cache);
-//        item->value = value;
-        item->key = key;
-        item->value_length = value_length;
-        item->key_length = key_length;
-        required = value_length;
-
-        if(prev)
-            prev->next = item;
-        else
-            cache->items[hash_index] = item;
-    }
-    item->access_count = ++cache->access_count;
-
-    // remove as many items as necessary to free enough space
-    if(required > 0 && required > cache->free_memory) {
-        while(cache->free_memory < required)
-            lruc_remove_lru_item(cache);
-    }
-    cache->free_memory -= required;
-    unlock_cache();
-    return LRUC_NO_ERROR;
 }
 
-
-lruc_error lruc_get(lruc *cache, void *key, uint32_t key_length) {
-    test_for_missing_cache();
-    test_for_missing_key();
-    lock_cache();
-
-    // loop until we find the item, or hit the end of a chain
-    uint32_t hash_index = lruc_hash(cache, key, key_length);
-    lruc_item *item = cache->items[hash_index];
-
-    while(item && lruc_cmp_keys(item, key, key_length))
-        item = (lruc_item *) item->next;
-
-    if(item) {
-//        *value = item->value;
-        item->access_count = ++cache->access_count;
-    } else {
-//        *value = NULL;
-    }
-
-    unlock_cache();
-    return LRUC_NO_ERROR;
+void printQueue(struct Queue *queue)
+{
+    fprintf(stderr,"\nCurrent lru size=%lu\n",queue->curSize);
+    for(struct QNode * temp=queue->front;temp!=NULL;temp=temp->next)
+        fprintf(stderr,"%s ",temp->key);
+    fprintf(stderr,"\n");
 }
 
-
-lruc_error lruc_delete(lruc *cache, void *key, uint32_t key_length) {
-    test_for_missing_cache();
-    test_for_missing_key();
-    lock_cache();
-
-    // loop until we find the item, or hit the end of a chain
-    lruc_item *item = NULL, *prev = NULL;
-    uint32_t hash_index = lruc_hash(cache, key, key_length);
-    item = cache->items[hash_index];
-
-    while(item && lruc_cmp_keys(item, key, key_length)) {
-        prev = item;
-        item = (lruc_item *) item->next;
-    }
-
-    if(item) {
-        lruc_remove_item(cache, prev, item, hash_index);
-    }
-
-    unlock_cache();
-    return LRUC_NO_ERROR;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-//#include <stdio.h>
-//#include <stdlib.h>
-//#include "memcached.h"
+////#include <stdio.h>
+////#include <stdlib.h>
+////#include "memcached.h"
+////
+//////static bdb_node ** bdb_malloc_buffer;
+////static int bdb_lru_allowed_numbober_of_items;
+////static int bdb_lru_current_number_of_items;
+////bdb_node * front,*rear;
+////
+//////initial number of allowed items
+////#define INIT_LRU_FREELIST_LENGTH 500
+////
+////typedef struct bdb_node
+////{
+////    char * key;
+////    size_t item_size;
+////    bdb_node * prev, * next;
+////} bdb_node;
+////
+//////contains pointers to actual queue
+////typedef struct queue_node
+////
+////
+////void bdb_malloc_buffer_init(void) {
+////
+////    bdb_lru_allowed_number_of_items = INIT_LRU_FREELIST_LENGTH;
+////    bdb_lru_current_number_of_items  = 0;
+////
+//////    bdb_malloc_buffer = (bdb_node **)malloc( sizeof(bdb_node *) * bdb_lru_allowed_number_of_items );
+//////    if (bdb_malloc_buffer == NULL) {
+//////        perror("malloc()");
+//////    }
+////    return;
+////}
 //
-////static bdb_node ** bdb_malloc_buffer;
-//static int bdb_lru_allowed_number_of_items;
-//static int bdb_lru_current_number_of_items;
-//bdb_node * front,*rear;
-//
-////initial number of allowed items
-//#define INIT_LRU_FREELIST_LENGTH 500
-//
-//typedef struct bdb_node
-//{
-//    char * key;
-//    size_t item_size;
-//    bdb_node * prev, * next;
-//} bdb_node;
-//
-////contains pointers to actual queue
-//typedef struct queue_node
-//
-//
-//void bdb_malloc_buffer_init(void) {
-//
-//    bdb_lru_allowed_number_of_items = INIT_LRU_FREELIST_LENGTH;
-//    bdb_lru_current_number_of_items  = 0;
-//
-////    bdb_malloc_buffer = (bdb_node **)malloc( sizeof(bdb_node *) * bdb_lru_allowed_number_of_items );
-////    if (bdb_malloc_buffer == NULL) {
-////        perror("malloc()");
+///*
+// * Returns a item buffer from the freelist, if any. Should call
+// * item_from_freelist for thread safty.
+// * */
+////bdb_node *do_item_from_freelist_bdb(void) {
+////
+////    bdb_node *s;
+////
+////    if (bdb_lru_current_number_of_items < bdb_lru_allowed_number_of_items-1) {
+////        s = bdb_malloc_buffer[bdb_lru_current_number_of_items++];
 ////    }
-//    return;
-//}
-
-/*
- * Returns a item buffer from the freelist, if any. Should call
- * item_from_freelist for thread safty.
- * */
-//bdb_node *do_item_from_freelist_bdb(void) {
+////    else {
+////        /*double the size of the buffer if insufficient space*/
+////        item **new_bdb_malloc_buffer = (bdb_node **)realloc(bdb_malloc_buffer, sizeof(bdb_node *) * bdb_lru_allowed_number_of_items * 2);
+////
+////        if (new_bdb_malloc_buffer)
+////        {
+////            bdb_lru_allowed_number_of_items *= 2;
+////            //copy items from old buffer to new buffer from front to rear and reset front and rear
+////            bdb_malloc_buffer = new_bdb_malloc_buffer;
+////            s=bdb_malloc_buffer[bdb_lru_current_number_of_items++];
+////        }
+////        else
+////            s=NULL;
+////    }
+////
+////    return s;
+////}
 //
-//    bdb_node *s;
+//// A utility function to create a new Queue Node. The queue Node
+//// will store the given key and size
+////bdb_node* newbdb_node(char *key,size_t item_size)
+////{
+////    // Allocate memory and assign 'pageNumber'
+////    bdb_node* temp = do_item_from_freelist_bdb();
+////    temp->key = key;
+////    temp->item_size = item_size;
+////
+////    // Initialize prev and next as NULL
+////    temp->prev = temp->next = NULL;
+////
+////    return temp;
+////}
 //
-//    if (bdb_lru_current_number_of_items < bdb_lru_allowed_number_of_items-1) {
-//        s = bdb_malloc_buffer[bdb_lru_current_number_of_items++];
-//    }
-//    else {
-//        /*double the size of the buffer if insufficient space*/
-//        item **new_bdb_malloc_buffer = (bdb_node **)realloc(bdb_malloc_buffer, sizeof(bdb_node *) * bdb_lru_allowed_number_of_items * 2);
-//
-//        if (new_bdb_malloc_buffer)
-//        {
-//            bdb_lru_allowed_number_of_items *= 2;
-//            //copy items from old buffer to new buffer from front to rear and reset front and rear
-//            bdb_malloc_buffer = new_bdb_malloc_buffer;
-//            s=bdb_malloc_buffer[bdb_lru_current_number_of_items++];
-//        }
-//        else
-//            s=NULL;
-//    }
-//
-//    return s;
-//}
-
-// A utility function to create a new Queue Node. The queue Node
-// will store the given key and size
-//bdb_node* newbdb_node(char *key,size_t item_size)
-//{
-//    // Allocate memory and assign 'pageNumber'
-//    bdb_node* temp = do_item_from_freelist_bdb();
-//    temp->key = key;
-//    temp->item_size = item_size;
-//
-//    // Initialize prev and next as NULL
-//    temp->prev = temp->next = NULL;
-//
-//    return temp;
-//}
-
-//add to lru queue
-//int add_to_bdb_lru(char * key,size_t item_size)
-//{
-//    rear->next=
-//}
+////add to lru queue
+////int add_to_bdb_lru(char * key,size_t item_size)
+////{
+////    rear->next=
+////}
