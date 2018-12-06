@@ -961,6 +961,7 @@ struct QNode
 struct Queue
 {
     struct QNode *front, *rear;
+    pthread_mutex_t *mutex;
     size_t curSize;
 };
 
@@ -977,8 +978,15 @@ extern struct Queue* lruQueue;
 
 
 
-#define CACHE_SIZE  (8 * 1024)  // 8k
+#define CACHE_SIZE  (10000 * 1024 * 1024L)  // 8k
 
+#define lock_cache()    if(pthread_mutex_lock(lruQueue->mutex)) {\
+  perror("LRU Cache unable to obtain mutex lock");\
+}
+
+#define unlock_cache()  if(pthread_mutex_unlock(lruQueue->mutex)) {\
+  perror("LRU Cache unable to release mutex lock");\
+  }
 
 
 //#define AVG_SIZE    (2 * 1024)  // 2k

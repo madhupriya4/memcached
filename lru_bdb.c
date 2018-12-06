@@ -16,6 +16,13 @@ struct Queue* createQueue(void)
     struct Queue *q = (struct Queue*)malloc(sizeof(struct Queue));
     q->front = q->rear = NULL;
     q->curSize=0;
+    q->mutex = (pthread_mutex_t *) malloc(sizeof(pthread_mutex_t));
+    if(pthread_mutex_init(q->mutex, NULL)) {
+        perror("LRU Cache unable to initialise mutex");
+        free(q);
+        return NULL;
+    }
+
     return q;
 }
 // A utility function to create a new linked list node.
@@ -39,18 +46,22 @@ void enQueue(struct Queue *q, char * key,uint8_t keyLength,int valueLength)
     struct QNode *temp = newNode(key,keyLength,valueLength);
     fprintf(stderr,"printing temp node's values:-\nkey=%s\nkey length=%ul\nvalue length=%d\n",key,keyLength,valueLength);
 
+
     q->curSize+=(temp->valueLength+temp->keyLength);
 
     // If queue is empty, then new node is front and rear both
     if (q->rear == NULL)
     {
         q->front = q->rear = temp;
+        unlock_cache();
         return;
     }
 
     // Add the new node at the end of queue and change rear
     q->rear->next = temp;
     q->rear = temp;
+
+
 
     fprintf(stderr,"\ncur size=%zu \n",q->curSize);
 }
@@ -59,8 +70,12 @@ void enQueue(struct Queue *q, char * key,uint8_t keyLength,int valueLength)
 struct QNode *deQueue(struct Queue *q)
 {
     // If queue is empty, return NULL.
+    lock_cache();
     if (q->front == NULL)
+    {
+        unlock_cache();
         return NULL;
+    }
 
     // Store previous front and move front one node ahead
     struct QNode *temp = q->front;
@@ -70,7 +85,10 @@ struct QNode *deQueue(struct Queue *q)
     // If front becomes NULL, then change rear also as NULL
     if (q->front == NULL)
         q->rear = NULL;
+    unlock_cache();
     return temp;
+
+
 }
 
 struct QNode *  keyNodePointer(struct Queue *q, char * key)
@@ -86,11 +104,15 @@ struct QNode *  keyNodePointer(struct Queue *q, char * key)
 
 void deleteKey(struct Queue *queue, char * key)
 {
+    lock_cache();
     struct QNode* reqPage = keyNodePointer(queue, key);
 
 
     if ( reqPage == NULL )
+    {
+        unlock_cache();
         return;
+    }
 
     else if (reqPage == queue->front && reqPage==queue->rear)
     {
@@ -121,10 +143,12 @@ void deleteKey(struct Queue *queue, char * key)
         }
 
     }
+    unlock_cache();
 }
 
 void ReferencePage(struct Queue *queue, char * key, uint8_t keyLength,int valueLength)
 {
+    lock_cache();
     struct QNode* reqPage = keyNodePointer(queue, key);
 
     // the page is not in cache, bring it
@@ -146,6 +170,7 @@ void ReferencePage(struct Queue *queue, char * key, uint8_t keyLength,int valueL
         queue->rear->next=NULL;
 
     }
+    unlock_cache();
 }
 
 void printQueue(struct Queue *queue)
