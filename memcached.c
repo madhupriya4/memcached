@@ -137,13 +137,12 @@ void *ext_storage;
 struct settings_bdb settings_bdb;
 struct bdb_settings bdb_settings;
 struct bdb_version bdb_version;
+lruc *cache;
 
 
 DB_ENV *env;
 DB *dbp;
 DB_MPOOLFILE *mpf;
-struct Queue* lruQueue;
-
 
 int daemon_quit = 0;
 
@@ -233,7 +232,9 @@ static void stats_reset(void) {
 
 static void settings_init(void) {
 
-    lruQueue=createQueue();
+
+    //cache = lruc_new(CACHE_SIZE, AVG_SIZE);
+
 
     settings.use_cas = true;
     settings.access = 0700;
@@ -2744,101 +2745,101 @@ static void complete_nread(conn *c) {
 
 /* Destination must always be chunked */
 /* This should be part of item.c */
-//static int _store_item_copy_chunks(item *d_it, item *s_it, const int len) {
-//    item_chunk *dch = (item_chunk *) ITEM_schunk(d_it);
-//    /* Advance dch until we find free space */
-//    while (dch->size == dch->used) {
-//        if (dch->next) {
-//            dch = dch->next;
-//        } else {
-//            break;
-//        }
-//    }
-//
-//    if (s_it->it_flags & ITEM_CHUNKED) {
-//        int remain = len;
-//        item_chunk *sch = (item_chunk *) ITEM_schunk(s_it);
-//        int copied = 0;
-//        /* Fills dch's to capacity, not straight copy sch in case data is
-//         * being added or removed (ie append/prepend)
-//         */
-//        while (sch && dch && remain) {
-//            assert(dch->used <= dch->size);
-//            int todo = (dch->size - dch->used < sch->used - copied)
-//                ? dch->size - dch->used : sch->used - copied;
-//            if (remain < todo)
-//                todo = remain;
-//            memcpy(dch->data + dch->used, sch->data + copied, todo);
-//            dch->used += todo;
-//            copied += todo;
-//            remain -= todo;
-//            assert(dch->used <= dch->size);
-//            if (dch->size == dch->used) {
-//                item_chunk *tch = do_item_alloc_chunk(dch, remain);
-//                if (tch) {
-//                    dch = tch;
-//                } else {
-//                    return -1;
-//                }
-//            }
-//            assert(copied <= sch->used);
-//            if (copied == sch->used) {
-//                copied = 0;
-//                sch = sch->next;
-//            }
-//        }
-//        /* assert that the destination had enough space for the source */
-//        assert(remain == 0);
-//    } else {
-//        int done = 0;
-//        /* Fill dch's via a non-chunked item. */
-//        while (len > done && dch) {
-//            int todo = (dch->size - dch->used < len - done)
-//                ? dch->size - dch->used : len - done;
-//            //assert(dch->size - dch->used != 0);
-//            memcpy(dch->data + dch->used, ITEM_data(s_it) + done, todo);
-//            done += todo;
-//            dch->used += todo;
-//            assert(dch->used <= dch->size);
-//            if (dch->size == dch->used) {
-//                item_chunk *tch = do_item_alloc_chunk(dch, len - done);
-//                if (tch) {
-//                    dch = tch;
-//                } else {
-//                    return -1;
-//                }
-//            }
-//        }
-//        assert(len == done);
-//    }
-//    return 0;
-//}
+static int _store_item_copy_chunks(item *d_it, item *s_it, const int len) {
+    item_chunk *dch = (item_chunk *) ITEM_schunk(d_it);
+    /* Advance dch until we find free space */
+    while (dch->size == dch->used) {
+        if (dch->next) {
+            dch = dch->next;
+        } else {
+            break;
+        }
+    }
 
-//static int _store_item_copy_data(int comm, item *old_it, item *new_it, item *add_it) {
-//    if (comm == NREAD_APPEND) {
-//        if (new_it->it_flags & ITEM_CHUNKED) {
-//            if (_store_item_copy_chunks(new_it, old_it, old_it->nbytes - 2) == -1 ||
-//                _store_item_copy_chunks(new_it, add_it, add_it->nbytes) == -1) {
-//                return -1;
-//            }
-//        } else {
-//            memcpy(ITEM_data(new_it), ITEM_data(old_it), old_it->nbytes);
-//            memcpy(ITEM_data(new_it) + old_it->nbytes - 2 /* CRLF */, ITEM_data(add_it), add_it->nbytes);
-//        }
-//    } else {
-//        /* NREAD_PREPEND */
-//        if (new_it->it_flags & ITEM_CHUNKED) {
-//            if (_store_item_copy_chunks(new_it, add_it, add_it->nbytes - 2) == -1 ||
-//                _store_item_copy_chunks(new_it, old_it, old_it->nbytes) == -1) {
-//                return -1;
-//            }
-//        } else {
-//            memcpy(ITEM_data(new_it), ITEM_data(add_it), add_it->nbytes);
-//            memcpy(ITEM_data(new_it) + add_it->nbytes - 2 /* CRLF */, ITEM_data(old_it), old_it->nbytes);
-//        }
-//    }
-//    return 0;
-//}
+    if (s_it->it_flags & ITEM_CHUNKED) {
+        int remain = len;
+        item_chunk *sch = (item_chunk *) ITEM_schunk(s_it);
+        int copied = 0;
+        /* Fills dch's to capacity, not straight copy sch in case data is
+         * being added or removed (ie append/prepend)
+         */
+        while (sch && dch && remain) {
+            assert(dch->used <= dch->size);
+            int todo = (dch->size - dch->used < sch->used - copied)
+                ? dch->size - dch->used : sch->used - copied;
+            if (remain < todo)
+                todo = remain;
+            memcpy(dch->data + dch->used, sch->data + copied, todo);
+            dch->used += todo;
+            copied += todo;
+            remain -= todo;
+            assert(dch->used <= dch->size);
+            if (dch->size == dch->used) {
+                item_chunk *tch = do_item_alloc_chunk(dch, remain);
+                if (tch) {
+                    dch = tch;
+                } else {
+                    return -1;
+                }
+            }
+            assert(copied <= sch->used);
+            if (copied == sch->used) {
+                copied = 0;
+                sch = sch->next;
+            }
+        }
+        /* assert that the destination had enough space for the source */
+        assert(remain == 0);
+    } else {
+        int done = 0;
+        /* Fill dch's via a non-chunked item. */
+        while (len > done && dch) {
+            int todo = (dch->size - dch->used < len - done)
+                ? dch->size - dch->used : len - done;
+            //assert(dch->size - dch->used != 0);
+            memcpy(dch->data + dch->used, ITEM_data(s_it) + done, todo);
+            done += todo;
+            dch->used += todo;
+            assert(dch->used <= dch->size);
+            if (dch->size == dch->used) {
+                item_chunk *tch = do_item_alloc_chunk(dch, len - done);
+                if (tch) {
+                    dch = tch;
+                } else {
+                    return -1;
+                }
+            }
+        }
+        assert(len == done);
+    }
+    return 0;
+}
+
+static int _store_item_copy_data(int comm, item *old_it, item *new_it, item *add_it) {
+    if (comm == NREAD_APPEND) {
+        if (new_it->it_flags & ITEM_CHUNKED) {
+            if (_store_item_copy_chunks(new_it, old_it, old_it->nbytes - 2) == -1 ||
+                _store_item_copy_chunks(new_it, add_it, add_it->nbytes) == -1) {
+                return -1;
+            }
+        } else {
+            memcpy(ITEM_data(new_it), ITEM_data(old_it), old_it->nbytes);
+            memcpy(ITEM_data(new_it) + old_it->nbytes - 2 /* CRLF */, ITEM_data(add_it), add_it->nbytes);
+        }
+    } else {
+        /* NREAD_PREPEND */
+        if (new_it->it_flags & ITEM_CHUNKED) {
+            if (_store_item_copy_chunks(new_it, add_it, add_it->nbytes - 2) == -1 ||
+                _store_item_copy_chunks(new_it, old_it, old_it->nbytes) == -1) {
+                return -1;
+            }
+        } else {
+            memcpy(ITEM_data(new_it), ITEM_data(add_it), add_it->nbytes);
+            memcpy(ITEM_data(new_it) + add_it->nbytes - 2 /* CRLF */, ITEM_data(old_it), old_it->nbytes);
+        }
+    }
+    return 0;
+}
 
 /*
  * Stores an item in the cache according to the semantics of one of the set
@@ -2850,129 +2851,137 @@ enum store_item_type do_store_item(item *it, int comm, conn *c, const uint32_t h
 
 
 
-//    char *key = ITEM_key(it);
-//    item *old_it = do_item_get(key, it->nkey, hv, c, DONT_UPDATE);
-//    enum store_item_type stored = NOT_STORED;
-//
-//    item *new_it = NULL;
-//    uint32_t flags;
-//
-//    if (old_it != NULL && comm == NREAD_ADD) {
-//        /* add only adds a nonexistent item, but promote to head of LRU */
-//        do_item_update(old_it);
-//    } else if (!old_it && (comm == NREAD_REPLACE
-//        || comm == NREAD_APPEND || comm == NREAD_PREPEND))
-//    {
-//        /* replace only replaces an existing value; don't store */
-//    } else if (comm == NREAD_CAS) {
-//        /* validate cas operation */
-//        if(old_it == NULL) {
-//            // LRU expired
-//            stored = NOT_FOUND;
-//            pthread_mutex_lock(&c->thread->stats.mutex);
-//            c->thread->stats.cas_misses++;
-//            pthread_mutex_unlock(&c->thread->stats.mutex);
-//        }
-//        else if (ITEM_get_cas(it) == ITEM_get_cas(old_it)) {
-//            // cas validates
-//            // it and old_it may belong to different classes.
-//            // I'm updating the stats for the one that's getting pushed out
-//            pthread_mutex_lock(&c->thread->stats.mutex);
-//            c->thread->stats.slab_stats[ITEM_clsid(old_it)].cas_hits++;
-//            pthread_mutex_unlock(&c->thread->stats.mutex);
-//
-//            STORAGE_delete(c->thread->storage, old_it);
-//            item_replace(old_it, it, hv);
-//            stored = STORED;
-//        } else {
-//            pthread_mutex_lock(&c->thread->stats.mutex);
-//            c->thread->stats.slab_stats[ITEM_clsid(old_it)].cas_badval++;
-//            pthread_mutex_unlock(&c->thread->stats.mutex);
-//
-//            if(settings.verbose > 1) {
-//                fprintf(stderr, "CAS:  failure: expected %llu, got %llu\n",
-//                        (unsigned long long)ITEM_get_cas(old_it),
-//                        (unsigned long long)ITEM_get_cas(it));
-//            }
-//            stored = EXISTS;
-//        }
-//    } else {
-//        int failed_alloc = 0;
-//        /*
-//         * Append - combine new and old record into single one. Here it's
-//         * atomic and thread-safe.
-//         */
-//        if (comm == NREAD_APPEND || comm == NREAD_PREPEND) {
-//            /*
-//             * Validate CAS
-//             */
-//            if (ITEM_get_cas(it) != 0) {
-//                // CAS much be equal
-//                if (ITEM_get_cas(it) != ITEM_get_cas(old_it)) {
-//                    stored = EXISTS;
-//                }
-//            }
-//#ifdef EXTSTORE
-//            if ((old_it->it_flags & ITEM_HDR) != 0) {
-//                /* block append/prepend from working with extstore-d items.
-//                 * also don't replace the header with the append chunk
-//                 * accidentally, so mark as a failed_alloc.
-//                 */
-//                failed_alloc = 1;
-//            } else
-//#endif
-//            if (stored == NOT_STORED) {
-//                /* we have it and old_it here - alloc memory to hold both */
-//                /* flags was already lost - so recover them from ITEM_suffix(it) */
-//                FLAGS_CONV(settings.inline_ascii_response, old_it, flags);
-//                new_it = do_item_alloc(key, it->nkey, flags, old_it->exptime, it->nbytes + old_it->nbytes - 2 /* CRLF */);
-//
-//                /* copy data from it and old_it to new_it */
-//                if (new_it == NULL || _store_item_copy_data(comm, old_it, new_it, it) == -1) {
-//                    failed_alloc = 1;
-//                    stored = NOT_STORED;
-//                    // failed data copy, free up.
-//                    if (new_it != NULL)
-//                        item_remove(new_it);
-//                } else {
-//                    it = new_it;
-//                }
-//            }
-//        }
-//
-//        if (stored == NOT_STORED && failed_alloc == 0) {
-//            if (old_it != NULL) {
-//                STORAGE_delete(c->thread->storage, old_it);
-//                item_replace(old_it, it, hv);
-//            } else {
-//                do_item_link(it, hv);
-//            }
-//
-//            c->cas = ITEM_get_cas(it);
-//
-//            stored = STORED;
-//        }
-//    }
-//
-//    if (old_it != NULL)
-//        do_item_remove(old_it);         /* release our reference */
-//    if (new_it != NULL)
-//        do_item_remove(new_it);
-//
-//    if (stored == STORED) {
-//        c->cas = ITEM_get_cas(it);
-//    }
-//    LOGGER_LOG(c->thread->l, LOG_MUTATIONS, LOGGER_ITEM_STORE, NULL,
-//            stored, comm, ITEM_key(it), it->nkey, it->exptime, ITEM_clsid(it));
-//
-//    return stored;
-
     char *key = ITEM_key(it);
-    int ret;
-    item *old_it = NULL;
+    item *bdb_old_it = item_get_bdb(ITEM_key(it), it->nkey);
+    item *old_it = do_item_get(key, it->nkey, hv, c, DONT_UPDATE);
+    enum store_item_type stored = NOT_STORED;
+
     item *new_it = NULL;
-    //int stored = 0;
-    int flags;
+    uint32_t flags;
+
+    if (old_it != NULL && comm == NREAD_ADD) {
+        /* add only adds a nonexistent item, but promote to head of LRU */
+        do_item_update(old_it);
+
+    } else if (!old_it && (comm == NREAD_REPLACE
+        || comm == NREAD_APPEND || comm == NREAD_PREPEND))
+    {
+        /* replace only replaces an existing value; don't store */
+    } else if (comm == NREAD_CAS) {
+        /* validate cas operation */
+        if(old_it == NULL) {
+            // LRU expired
+            stored = NOT_FOUND;
+            pthread_mutex_lock(&c->thread->stats.mutex);
+            c->thread->stats.cas_misses++;
+            pthread_mutex_unlock(&c->thread->stats.mutex);
+        }
+        else if (ITEM_get_cas(it) == ITEM_get_cas(old_it)) {
+            // cas validates
+            // it and old_it may belong to different classes.
+            // I'm updating the stats for the one that's getting pushed out
+            pthread_mutex_lock(&c->thread->stats.mutex);
+            c->thread->stats.slab_stats[ITEM_clsid(old_it)].cas_hits++;
+            pthread_mutex_unlock(&c->thread->stats.mutex);
+
+            STORAGE_delete(c->thread->storage, old_it);
+            item_replace(old_it, it, hv);
+            item_put_bdb(key, bdb_old_it->nkey, it);
+            stored = STORED;
+        } else {
+            pthread_mutex_lock(&c->thread->stats.mutex);
+            c->thread->stats.slab_stats[ITEM_clsid(old_it)].cas_badval++;
+            pthread_mutex_unlock(&c->thread->stats.mutex);
+
+            if(settings.verbose > 1) {
+                fprintf(stderr, "CAS:  failure: expected %llu, got %llu\n",
+                        (unsigned long long)ITEM_get_cas(old_it),
+                        (unsigned long long)ITEM_get_cas(it));
+            }
+            stored = EXISTS;
+        }
+    } else {
+        int failed_alloc = 0;
+        /*
+         * Append - combine new and old record into single one. Here it's
+         * atomic and thread-safe.
+         */
+        if (comm == NREAD_APPEND || comm == NREAD_PREPEND) {
+            /*
+             * Validate CAS
+             */
+            if (ITEM_get_cas(it) != 0) {
+                // CAS much be equal
+                if (ITEM_get_cas(it) != ITEM_get_cas(old_it)) {
+                    stored = EXISTS;
+                }
+            }
+#ifdef EXTSTORE
+            if ((old_it->it_flags & ITEM_HDR) != 0) {
+                /* block append/prepend from working with extstore-d items.
+                 * also don't replace the header with the append chunk
+                 * accidentally, so mark as a failed_alloc.
+                 */
+                failed_alloc = 1;
+            } else
+#endif
+            if (stored == NOT_STORED) {
+                /* we have it and old_it here - alloc memory to hold both */
+                /* flags was already lost - so recover them from ITEM_suffix(it) */
+                FLAGS_CONV(settings.inline_ascii_response, old_it, flags);
+                new_it = do_item_alloc(key, it->nkey, flags, old_it->exptime, it->nbytes + old_it->nbytes - 2 /* CRLF */);
+
+                /* copy data from it and old_it to new_it */
+                if (new_it == NULL || _store_item_copy_data(comm, old_it, new_it, it) == -1 || (item_put_bdb(key, bdb_old_it->nkey, it)!=0)) {
+                    failed_alloc = 1;
+                    stored = NOT_STORED;
+                    // failed data copy, free up.
+                    if (new_it != NULL){
+                        item_remove(new_it);
+//                        item_delete_bdb(key, it->nkey);
+                        }
+                } else {
+                    it = new_it;
+                }
+            }
+        }
+
+        if (stored == NOT_STORED && failed_alloc == 0) {
+            if (old_it != NULL) {
+                STORAGE_delete(c->thread->storage, old_it);
+                item_replace(old_it, it, hv);
+                item_put_bdb(key, it->nkey, it);
+            } else {
+                do_item_link(it, hv);
+                item_put_bdb(key, it->nkey, it);
+            }
+
+            c->cas = ITEM_get_cas(it);
+
+            stored = STORED;
+        }
+    }
+
+    if (old_it != NULL)
+        do_item_remove(old_it);         /* release our reference */
+    if (new_it != NULL)
+        do_item_remove(new_it);
+    if (bdb_old_it != NULL)
+        item_free(bdb_old_it);
+    if (stored == STORED) {
+        c->cas = ITEM_get_cas(it);
+    }
+    LOGGER_LOG(c->thread->l, LOG_MUTATIONS, LOGGER_ITEM_STORE, NULL,
+            stored, comm, ITEM_key(it), it->nkey, it->exptime, ITEM_clsid(it));
+
+    return stored;
+
+//    char *key = ITEM_key(it);
+    int ret;
+//    item *old_it = NULL;
+//    item *new_it = NULL;
+//    //int stored = 0;
+//    int flags;
 
     if (comm == NREAD_ADD || comm == NREAD_REPLACE) {
         ret = item_exists_bdb(key, strlen(key));
@@ -3014,19 +3023,13 @@ enum store_item_type do_store_item(item *it, int comm, conn *c, const uint32_t h
     ret = item_put_bdb(key, strlen(key), it);
 
     if (old_it != NULL)
-    {
         item_free_bdb(old_it);
-    }
-
-
     if (new_it != NULL)
         item_free_bdb(new_it);
 
     if (ret  == 0) {
-
         return 1;
-    }
-    else {
+    } else {
         return 0;
     }
 }
@@ -3902,10 +3905,11 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
     int i = 0;
     int si = 0;
     item *it;
+    item *bdb_it;
     token_t *key_token = &tokens[KEY_TOKEN];
     char *suffix;
     int32_t exptime_int = 0;
-//    rel_time_t exptime = 0;
+    rel_time_t exptime = 0;
     bool fail_length = false;
     assert(c != NULL);
 
@@ -3919,194 +3923,27 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
 //        exptime = realtime(exptime_int);
     }
 
-//    do {
-//        while(key_token->length != 0) {
-//
-//            key = key_token->value;
-//            nkey = key_token->length;
-//
-//            if (nkey > KEY_MAX_LENGTH) {
-//                fail_length = true;
-//                goto stop;
-//            }
-//
-//            it = limited_get(key, nkey, c, exptime, should_touch);
-//            if (settings.detail_enabled) {
-//                stats_prefix_record_get(key, nkey, NULL != it);
-//            }
-//            if (it) {
-//                if (_ascii_get_expand_ilist(c, i) != 0) {
-//                    item_remove(it);
-//                    goto stop;
-//                }
-//
-//                /*
-//                 * Construct the response. Each hit adds three elements to the
-//                 * outgoing data list:
-//                 *   "VALUE "
-//                 *   key
-//                 *   " " + flags + " " + data length + "\r\n" + data (with \r\n)
-//                 */
-//
-//                if (return_cas || !settings.inline_ascii_response)
-//                {
-//                  MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
-//                                        it->nbytes, ITEM_get_cas(it));
-//                  int nbytes;
-//                  suffix = _ascii_get_suffix_buf(c, si);
-//                  if (suffix == NULL) {
-//                      item_remove(it);
-//                      goto stop;
-//                  }
-//                  si++;
-//                  nbytes = it->nbytes;
-//                  int suffix_len = make_ascii_get_suffix(suffix, it, return_cas, nbytes);
-//                  if (add_iov(c, "VALUE ", 6) != 0 ||
-//                      add_iov(c, ITEM_key(it), it->nkey) != 0 ||
-//                      (settings.inline_ascii_response && add_iov(c, ITEM_suffix(it), it->nsuffix - 2) != 0) ||
-//                      add_iov(c, suffix, suffix_len) != 0)
-//                      {
-//                          item_remove(it);
-//                          goto stop;
-//                      }
-//#ifdef EXTSTORE
-//                  if (it->it_flags & ITEM_HDR) {
-//                      if (_get_extstore(c, it, c->iovused-3, 4) != 0) {
-//                          pthread_mutex_lock(&c->thread->stats.mutex);
-//                          c->thread->stats.get_oom_extstore++;
-//                          pthread_mutex_unlock(&c->thread->stats.mutex);
-//
-//                          item_remove(it);
-//                          goto stop;
-//                      }
-//                  } else if ((it->it_flags & ITEM_CHUNKED) == 0) {
-//#else
-//                  if ((it->it_flags & ITEM_CHUNKED) == 0) {
-//#endif
-//                      add_iov(c, ITEM_data(it), it->nbytes);
-//                  } else if (add_chunked_item_iovs(c, it, it->nbytes) != 0) {
-//                      item_remove(it);
-//                      goto stop;
-//                  }
-//                }
-//                else
-//                {
-//                  MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
-//                                        it->nbytes, ITEM_get_cas(it));
-//                  if (add_iov(c, "VALUE ", 6) != 0 ||
-//                      add_iov(c, ITEM_key(it), it->nkey) != 0)
-//                      {
-//                          item_remove(it);
-//                          goto stop;
-//                      }
-//                  if ((it->it_flags & ITEM_CHUNKED) == 0)
-//                      {
-//                          if (add_iov(c, ITEM_suffix(it), it->nsuffix + it->nbytes) != 0)
-//                          {
-//                              item_remove(it);
-//                              goto stop;
-//                          }
-//                      } else if (add_iov(c, ITEM_suffix(it), it->nsuffix) != 0 ||
-//                                 add_chunked_item_iovs(c, it, it->nbytes) != 0) {
-//                          item_remove(it);
-//                          goto stop;
-//                      }
-//                }
-//
-//
-//                if (settings.verbose > 1) {
-//                    int ii;
-//                    fprintf(stderr, ">%d sending key ", c->sfd);
-//                    for (ii = 0; ii < it->nkey; ++ii) {
-//                        fprintf(stderr, "%c", key[ii]);
-//                    }
-//                    fprintf(stderr, "\n");
-//                }
-//
-//                /* item_get() has incremented it->refcount for us */
-//                pthread_mutex_lock(&c->thread->stats.mutex);
-//                if (should_touch) {
-//                    c->thread->stats.touch_cmds++;
-//                    c->thread->stats.slab_stats[ITEM_clsid(it)].touch_hits++;
-//                } else {
-//                    c->thread->stats.lru_hits[it->slabs_clsid]++;
-//                    c->thread->stats.get_cmds++;
-//                }
-//                pthread_mutex_unlock(&c->thread->stats.mutex);
-//#ifdef EXTSTORE
-//                /* If ITEM_HDR, an io_wrap owns the reference. */
-//                if ((it->it_flags & ITEM_HDR) == 0) {
-//                    *(c->ilist + i) = it;
-//                    i++;
-//                }
-//#else
-//                *(c->ilist + i) = it;
-//                i++;
-//#endif
-//            } else {
-//                pthread_mutex_lock(&c->thread->stats.mutex);
-//                if (should_touch) {
-//                    c->thread->stats.touch_cmds++;
-//                    c->thread->stats.touch_misses++;
-//                } else {
-//                    c->thread->stats.get_misses++;
-//                    c->thread->stats.get_cmds++;
-//                }
-//                MEMCACHED_COMMAND_GET(c->sfd, key, nkey, -1, 0);
-//                pthread_mutex_unlock(&c->thread->stats.mutex);
-//            }
-//
-//            key_token++;
-//        }
-//
-//        /*
-//         * If the command string hasn't been fully processed, get the next set
-//         * of tokens.
-//         */
-//        if(key_token->value != NULL) {
-//            ntokens = tokenize_command(key_token->value, tokens, MAX_TOKENS);
-//            key_token = tokens;
-//        }
-//
-//    } while(key_token->value != NULL);
-//stop:
-
     do {
         while(key_token->length != 0) {
 
             key = key_token->value;
             nkey = key_token->length;
 
-            if(nkey > KEY_MAX_LENGTH) {
-//                STATS_LOCK();
-//                stats.get_cmds   += stats_get_cmds;
-//                stats.get_hits   += stats_get_hits;
-//                stats.get_misses += stats_get_misses;
-//                STATS_UNLOCK();
-                out_string(c, "CLIENT_ERROR bad command line format");
-                return;
+            if (nkey > KEY_MAX_LENGTH) {
+                fail_length = true;
+                goto stop;
             }
 
-//            stats_get_cmds++;
-            fprintf(stderr,"trying to get key:%s,%zu\n",key,nkey);
-            it = item_get_bdb(key, nkey);
-
-            if (it) {
-
-                fprintf(stderr, "item is not null \n");
-                if (i >= c->isize) {
-
-
-                    fprintf(stderr, "i >= c->isize\n");
-                    item **new_list = realloc(c->ilist, sizeof(item *) * c->isize * 2);
-                    if (new_list) {
-                        c->isize *= 2;
-                        c->ilist = new_list;
-                    } else {
-                        item_free_bdb(it);
-                        it = NULL;
-                        break;
-                    }
+            it = limited_get(key, nkey, c, exptime, should_touch);
+            bdb_it = item_get_bdb(key, nkey);
+            if (settings.detail_enabled) {
+                stats_prefix_record_get(key, nkey, NULL != it);
+            }
+            if (it && bdb_it) {
+                if (_ascii_get_expand_ilist(c, i) != 0) {
+                    item_remove(it);
+//                    item_delete_bdb(key, nkey);
+                    goto stop;
                 }
 
                 /*
@@ -4117,8 +3954,182 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
                  *   " " + flags + " " + data length + "\r\n" + data (with \r\n)
                  */
 
-                fprintf(stderr, "\n\nitem data=%s\n", ITEM_data(it));
+                if (return_cas || !settings.inline_ascii_response)
+                {
+                  MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
+                                        it->nbytes, ITEM_get_cas(it));
+                  int nbytes;
+                  suffix = _ascii_get_suffix_buf(c, si);
+                  if (suffix == NULL) {
+                      item_remove(it);
+//                      item_delete_bdb(key, nkey);
+                      goto stop;
+                  }
+                  si++;
+                  nbytes = bdb_it->nbytes;
 
+                  int suffix_len = make_ascii_get_suffix(suffix, bdb_it, return_cas, nbytes);
+                  if (add_iov(c, "VALUE ", 6) != 0 ||
+                      add_iov(c, ITEM_key(bdb_it), bdb_it->nkey) != 0 ||
+                      (settings.inline_ascii_response && add_iov(c, ITEM_suffix(bdb_it), bdb_it->nsuffix - 2) != 0) ||
+                      add_iov(c, suffix, suffix_len) != 0)
+                      {
+                          fprintf(stderr,"add iov with bdb wasn't successful \n");
+                          item_remove(it);
+//                          item_delete_bdb(key, nkey);
+                          goto stop;
+                      }
+#ifdef EXTSTORE
+                  if (it->it_flags & ITEM_HDR) {
+                      if (_get_extstore(c, it, c->iovused-3, 4) != 0) {
+                          pthread_mutex_lock(&c->thread->stats.mutex);
+                          c->thread->stats.get_oom_extstore++;
+                          pthread_mutex_unlock(&c->thread->stats.mutex);
+
+                          item_remove(it);
+//                          item_delete_bdb(key, nkey);
+                          goto stop;
+                      }
+                  } else if ((it->it_flags & ITEM_CHUNKED) == 0) {
+#else
+                  if ((it->it_flags & ITEM_CHUNKED) == 0) {
+#endif
+                      add_iov(c, ITEM_data(it), it->nbytes);
+                  } else if (add_chunked_item_iovs(c, it, it->nbytes) != 0) {
+                      item_remove(it);
+                      goto stop;
+                  }
+                }
+                else
+                {
+                  MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
+                                        it->nbytes, ITEM_get_cas(it));
+                  if (add_iov(c, "VALUE ", 6) != 0 ||
+                      add_iov(c, ITEM_key(it), it->nkey) != 0)
+                      {
+                          item_remove(it);
+                          goto stop;
+                      }
+                  if ((it->it_flags & ITEM_CHUNKED) == 0)
+                      {
+                          if (add_iov(c, ITEM_suffix(it), it->nsuffix + it->nbytes) != 0)
+                          {
+                              item_remove(it);
+                              goto stop;
+                          }
+                      } else if (add_iov(c, ITEM_suffix(it), it->nsuffix) != 0 ||
+                                 add_chunked_item_iovs(c, it, it->nbytes) != 0) {
+                          item_remove(it);
+                          goto stop;
+                      }
+                }
+
+
+                if (settings.verbose > 1) {
+                    int ii;
+                    fprintf(stderr, ">%d sending key ", c->sfd);
+                    for (ii = 0; ii < it->nkey; ++ii) {
+                        fprintf(stderr, "%c", key[ii]);
+                    }
+                    fprintf(stderr, "\n");
+                }
+
+                /* item_get() has incremented it->refcount for us */
+                pthread_mutex_lock(&c->thread->stats.mutex);
+                if (should_touch) {
+                    c->thread->stats.touch_cmds++;
+                    c->thread->stats.slab_stats[ITEM_clsid(it)].touch_hits++;
+                } else {
+                    c->thread->stats.lru_hits[it->slabs_clsid]++;
+                    c->thread->stats.get_cmds++;
+                }
+                pthread_mutex_unlock(&c->thread->stats.mutex);
+#ifdef EXTSTORE
+                /* If ITEM_HDR, an io_wrap owns the reference. */
+                if ((it->it_flags & ITEM_HDR) == 0) {
+                    *(c->ilist + i) = it;
+                    i++;
+                }
+#else
+                *(c->ilist + i) = bdb_it;
+                i++;
+#endif
+            } else {
+                pthread_mutex_lock(&c->thread->stats.mutex);
+                if (should_touch) {
+                    c->thread->stats.touch_cmds++;
+                    c->thread->stats.touch_misses++;
+                } else {
+                    c->thread->stats.get_misses++;
+                    c->thread->stats.get_cmds++;
+                }
+                MEMCACHED_COMMAND_GET(c->sfd, key, nkey, -1, 0);
+                pthread_mutex_unlock(&c->thread->stats.mutex);
+            }
+
+            key_token++;
+        }
+
+        /*
+         * If the command string hasn't been fully processed, get the next set
+         * of tokens.
+         */
+        if(key_token->value != NULL) {
+            ntokens = tokenize_command(key_token->value, tokens, MAX_TOKENS);
+            key_token = tokens;
+        }
+
+    } while(key_token->value != NULL);
+stop:
+
+//    do {
+//        while(key_token->length != 0) {
+//
+//            key = key_token->value;
+//            nkey = key_token->length;
+//
+//            if(nkey > KEY_MAX_LENGTH) {
+////                STATS_LOCK();
+////                stats.get_cmds   += stats_get_cmds;
+////                stats.get_hits   += stats_get_hits;
+////                stats.get_misses += stats_get_misses;
+////                STATS_UNLOCK();
+//                out_string(c, "CLIENT_ERROR bad command line format");
+//                return;
+//            }
+//
+////            stats_get_cmds++;
+//            fprintf(stderr,"trying to get key:%s,%zu\n",key,nkey);
+//            it = item_get_bdb(key, nkey);
+//
+//            if (it) {
+//
+//                fprintf(stderr, "item is not null \n");
+//                if (i >= c->isize) {
+//
+//
+//                    fprintf(stderr, "i >= c->isize\n");
+//                    item **new_list = realloc(c->ilist, sizeof(item *) * c->isize * 2);
+//                    if (new_list) {
+//                        c->isize *= 2;
+//                        c->ilist = new_list;
+//                    } else {
+//                        item_free_bdb(it);
+//                        it = NULL;
+//                        break;
+//                    }
+//                }
+//
+//                /*
+//                 * Construct the response. Each hit adds three elements to the
+//                 * outgoing data list:
+//                 *   "VALUE "
+//                 *   key
+//                 *   " " + flags + " " + data length + "\r\n" + data (with \r\n)
+//                 */
+//
+//                fprintf(stderr, "\n\nitem data=%s\n", ITEM_data(it));
+//
 //
 //                if (add_iov(c, "VALUE ", 6) != 0 || add_iov(c, ITEM_key(it), it->nkey) != 0
 //                || add_iov(c, ITEM_key(it), it->nkey) != 0
@@ -4141,109 +4152,109 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
 //                            }
 //                        }
 //                }
-
-
-                if (return_cas || !settings.inline_ascii_response)
-                {
-                  MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
-                                        it->nbytes, ITEM_get_cas(it));
-                  int nbytes;
-                  suffix = _ascii_get_suffix_buf(c, si);
-                  if (suffix == NULL) {
-                      item_remove(it);
-                      //goto stop;
-                      break;
-                  }
-                  si++;
-                  nbytes = it->nbytes;
-                  int suffix_len = make_ascii_get_suffix(suffix, it, return_cas, nbytes);
-                  if (add_iov(c, "VALUE ", 6) != 0 ||
-                      add_iov(c, ITEM_key(it), it->nkey) != 0 ||
-                      (settings.inline_ascii_response && add_iov(c, ITEM_suffix(it), it->nsuffix - 2) != 0) ||
-                      add_iov(c, suffix, suffix_len) != 0)
-                      {
-                          item_remove(it);
-                          //goto stop;
-                          break;
-                      }
-#ifdef EXTSTORE
-                  if (it->it_flags & ITEM_HDR) {
-                      if (_get_extstore(c, it, c->iovused-3, 4) != 0) {
-                          pthread_mutex_lock(&c->thread->stats.mutex);
-                          c->thread->stats.get_oom_extstore++;
-                          pthread_mutex_unlock(&c->thread->stats.mutex);
-
-                          item_remove(it);
-                          //goto stop;
-                          break;
-                      }
-                  } else if ((it->it_flags & ITEM_CHUNKED) == 0) {
-#else
-                  if ((it->it_flags & ITEM_CHUNKED) == 0) {
-#endif
-                      add_iov(c, ITEM_data(it), it->nbytes);
-                  } else if (add_chunked_item_iovs(c, it, it->nbytes) != 0) {
-                      item_remove(it);
-                      //goto stop;
-                      break;
-                  }
-                }
-                else
-                {
-                  MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
-                                        it->nbytes, ITEM_get_cas(it));
-                  if (add_iov(c, "VALUE ", 6) != 0 ||
-                      add_iov(c, ITEM_key(it), it->nkey) != 0)
-                      {
-                          item_remove(it);
-//                          goto stop;
-                            break;
-                      }
-                  if ((it->it_flags & ITEM_CHUNKED) == 0)
-                      {
-                          if (add_iov(c, ITEM_suffix(it), it->nsuffix + it->nbytes) != 0)
-                          {
-                              item_remove(it);
-                              break;
-                              //goto stop;
-                          }
-                      } else if (add_iov(c, ITEM_suffix(it), it->nsuffix) != 0 ||
-                                 add_chunked_item_iovs(c, it, it->nbytes) != 0) {
-                          item_remove(it);
-                          break;
-                          //goto stop;
-                      }
-                }
-
-
-
-
-                if (settings.verbose > 1)
-                    fprintf(stderr, ">%d sending key %s\n", c->sfd, ITEM_key(it));
-
-//                stats_get_hits++;
-                *(c->ilist + i) = it;
-                fprintf(stderr, "\n\ncopied data=%s\n", ITEM_data(*(c->ilist + i)));
-                i++;
-
-            } else {
-//                stats_get_misses++;
-            }
-
-            key_token++;
-        }
-
-        /*
-         * If the command string hasn't been fully processed, get the next set
-         * of tokens.
-         */
-        if(key_token->value != NULL) {
-            ntokens = tokenize_command(key_token->value, tokens, MAX_TOKENS);
-            key_token = tokens;
-        }
-
-    } while(key_token->value != NULL);
-
+//
+//
+//                if (return_cas || !settings.inline_ascii_response)
+//                {
+//                  MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
+//                                        it->nbytes, ITEM_get_cas(it));
+//                  int nbytes;
+//                  suffix = _ascii_get_suffix_buf(c, si);
+//                  if (suffix == NULL) {
+//                      item_remove(it);
+//                      //goto stop;
+//                      break;
+//                  }
+//                  si++;
+//                  nbytes = it->nbytes;
+//                  int suffix_len = make_ascii_get_suffix(suffix, it, return_cas, nbytes);
+//                  if (add_iov(c, "VALUE ", 6) != 0 ||
+//                      add_iov(c, ITEM_key(it), it->nkey) != 0 ||
+//                      (settings.inline_ascii_response && add_iov(c, ITEM_suffix(it), it->nsuffix - 2) != 0) ||
+//                      add_iov(c, suffix, suffix_len) != 0)
+//                      {
+//                          item_remove(it);
+//                          //goto stop;
+//                          break;
+//                      }
+//#ifdef EXTSTORE
+//                  if (it->it_flags & ITEM_HDR) {
+//                      if (_get_extstore(c, it, c->iovused-3, 4) != 0) {
+//                          pthread_mutex_lock(&c->thread->stats.mutex);
+//                          c->thread->stats.get_oom_extstore++;
+//                          pthread_mutex_unlock(&c->thread->stats.mutex);
+//
+//                          item_remove(it);
+//                          //goto stop;
+//                          break;
+//                      }
+//                  } else if ((it->it_flags & ITEM_CHUNKED) == 0) {
+//#else
+//                  if ((it->it_flags & ITEM_CHUNKED) == 0) {
+//#endif
+//                      add_iov(c, ITEM_data(it), it->nbytes);
+//                  } else if (add_chunked_item_iovs(c, it, it->nbytes) != 0) {
+//                      item_remove(it);
+//                      //goto stop;
+//                      break;
+//                  }
+//                }
+//                else
+//                {
+//                  MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
+//                                        it->nbytes, ITEM_get_cas(it));
+//                  if (add_iov(c, "VALUE ", 6) != 0 ||
+//                      add_iov(c, ITEM_key(it), it->nkey) != 0)
+//                      {
+//                          item_remove(it);
+////                          goto stop;
+//                            break;
+//                      }
+//                  if ((it->it_flags & ITEM_CHUNKED) == 0)
+//                      {
+//                          if (add_iov(c, ITEM_suffix(it), it->nsuffix + it->nbytes) != 0)
+//                          {
+//                              item_remove(it);
+//                              break;
+//                              //goto stop;
+//                          }
+//                      } else if (add_iov(c, ITEM_suffix(it), it->nsuffix) != 0 ||
+//                                 add_chunked_item_iovs(c, it, it->nbytes) != 0) {
+//                          item_remove(it);
+//                          break;
+//                          //goto stop;
+//                      }
+//                }
+//
+//
+//
+//
+//                if (settings.verbose > 1)
+//                    fprintf(stderr, ">%d sending key %s\n", c->sfd, ITEM_key(it));
+//
+////                stats_get_hits++;
+//                *(c->ilist + i) = it;
+//                fprintf(stderr, "\n\ncopied data=%s\n", ITEM_data(*(c->ilist + i)));
+//                i++;
+//
+//            } else {
+////                stats_get_misses++;
+//            }
+//
+//            key_token++;
+//        }
+//
+//        /*
+//         * If the command string hasn't been fully processed, get the next set
+//         * of tokens.
+//         */
+//        if(key_token->value != NULL) {
+//            ntokens = tokenize_command(key_token->value, tokens, MAX_TOKENS);
+//            key_token = tokens;
+//        }
+//
+//    } while(key_token->value != NULL);
+//
 
 
 
@@ -4594,7 +4605,8 @@ enum delta_result_type do_add_delta(conn *c, const char *key, const size_t nkey,
 static void process_delete_command(conn *c, token_t *tokens, const size_t ntokens) {
     char *key;
     size_t nkey;
-//    item *it;
+    item *it;
+    item *bdb_it;
 
     assert(c != NULL);
 
@@ -4619,44 +4631,50 @@ static void process_delete_command(conn *c, token_t *tokens, const size_t ntoken
         return;
     }
 
-//    if (settings.detail_enabled) {
-//        stats_prefix_record_delete(key, nkey);
-//    }
-//
-//    it = item_get(key, nkey, c, DONT_UPDATE);
-//    if (it) {
-//        MEMCACHED_COMMAND_DELETE(c->sfd, ITEM_key(it), it->nkey);
-//
-//        pthread_mutex_lock(&c->thread->stats.mutex);
-//        c->thread->stats.slab_stats[ITEM_clsid(it)].delete_hits++;
-//        pthread_mutex_unlock(&c->thread->stats.mutex);
-//
-//        item_unlink(it);
-//        STORAGE_delete(c->thread->storage, it);
-//        item_remove(it);      /* release our reference */
-//        out_string(c, "DELETED");
-//    } else {
-//        pthread_mutex_lock(&c->thread->stats.mutex);
-//        c->thread->stats.delete_misses++;
-//        pthread_mutex_unlock(&c->thread->stats.mutex);
-//
-//        out_string(c, "NOT_FOUND");
-//    }
-
-    int ret;
-    switch (ret = item_delete_bdb(key, nkey)) {
-        case 0:
-            out_string(c, "DELETED");
-            break;
-        case 1:
-            out_string(c, "NOT_FOUND");
-            break;
-        case -1:
-            out_string(c, "SERVER_ERROR while delete a item");
-            break;
-        default:
-            out_string(c, "SERVER_ERROR nothing to do");
+    if (settings.detail_enabled) {
+        stats_prefix_record_delete(key, nkey);
     }
+
+    it = item_get(key, nkey, c, DONT_UPDATE);
+    bdb_it=item_get_bdb(key,nkey);
+    if (it && bdb_it) {
+        MEMCACHED_COMMAND_DELETE(c->sfd, ITEM_key(it), it->nkey);
+
+        pthread_mutex_lock(&c->thread->stats.mutex);
+        c->thread->stats.slab_stats[ITEM_clsid(it)].delete_hits++;
+        pthread_mutex_unlock(&c->thread->stats.mutex);
+
+        item_unlink(it);
+        STORAGE_delete(c->thread->storage, it);
+        item_remove(it);      /* release our reference */
+        out_string(c, "DELETED");
+//        ret = item_delete_bdb(key, nkey);
+//        fprintf(stderr, "return from delete = %d", ret);
+//        switch (ret) {
+//
+//            case 0:
+//                out_string(c, "DELETED");
+//                fprintf(stderr,"below the delete in process_delete\n");
+//                break;
+//            case 1:
+//                out_string(c, "NOT_FOUND");
+//                break;
+//            case -1:
+//                out_string(c, "SERVER_ERROR while delete a item");
+//                break;
+//            default:
+//                out_string(c, "SERVER_ERROR nothing to do");
+//        }
+    } else {
+        pthread_mutex_lock(&c->thread->stats.mutex);
+        c->thread->stats.delete_misses++;
+        pthread_mutex_unlock(&c->thread->stats.mutex);
+
+        out_string(c, "NOT_FOUND");
+    }
+
+
+
     return;
 
 }
@@ -7015,8 +7033,6 @@ int main (int argc, char **argv) {
     /* init settings */
 
     settings_init();
-    bdb_settings_init();
-
     /* get Berkeley DB version*/
     db_version(&(bdb_version.majver), &(bdb_version.minver), &(bdb_version.patch));
 
@@ -7144,6 +7160,7 @@ int main (int argc, char **argv) {
                 break;
             case 'm':
                 settings.maxbytes = ((size_t)atoi(optarg)) * 1024 * 1024;
+
                 break;
             case 'M':
                 settings.evict_to_free = 0;
@@ -7996,7 +8013,6 @@ int main (int argc, char **argv) {
 
     /* here we init bdb env and open db */
     bdb_env_init();
-    bdb_db_open();
 
     /* start up worker threads if MT mode */
 #ifdef EXTSTORE
@@ -8133,9 +8149,8 @@ int main (int argc, char **argv) {
 
     stop_assoc_maintenance_thread();
 
-    /* cleanup bdb stuff */
+    /* cleanup bdb staff */
     fprintf(stderr, "try to clean up bdb resource...\n");
-    bdb_chkpoint();
     bdb_db_close();
     bdb_env_close();
 

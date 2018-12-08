@@ -20,6 +20,7 @@
 #include <assert.h>
 #include <unistd.h>
 #include <poll.h>
+//#include "memcached.h"
 
 /* Forward Declarations */
 static void item_link_q(item *it);
@@ -499,6 +500,7 @@ void do_item_unlink(item *it, const uint32_t hv) {
         stats_state.curr_items -= 1;
         STATS_UNLOCK();
         item_stats_sizes_remove(it);
+        item_delete_bdb(ITEM_key(it), it->nkey);
         assoc_delete(ITEM_key(it), it->nkey, hv);
         item_unlink_q(it);
         do_item_remove(it);
@@ -515,6 +517,7 @@ void do_item_unlink_nolock(item *it, const uint32_t hv) {
         stats_state.curr_items -= 1;
         STATS_UNLOCK();
         item_stats_sizes_remove(it);
+        item_delete_bdb(ITEM_key(it), it->nkey);
         assoc_delete(ITEM_key(it), it->nkey, hv);
         do_item_unlink_q(it);
         do_item_remove(it);
@@ -523,6 +526,7 @@ void do_item_unlink_nolock(item *it, const uint32_t hv) {
 
 void do_item_remove(item *it) {
     MEMCACHED_ITEM_REMOVE(ITEM_key(it), it->nkey, it->nbytes);
+//    item_delete_bdb(ITEM_key(it), it->nkey);
     assert((it->it_flags & ITEM_SLABBED) == 0);
     assert(it->refcount > 0);
 
@@ -1041,6 +1045,7 @@ item *do_item_get(const char *key, const size_t nkey, const uint32_t hv, conn *c
                 } else {
                     it->it_flags |= ITEM_FETCHED;
                     do_item_update(it);
+
                 }
             }
             DEBUG_REFCNT(it, '+');
