@@ -942,7 +942,8 @@ item *item_cget_bdb(DBC *cursorp, char *start, size_t nstart, u_int32_t flags);
 
 /*lru changes*/
 
-#define CACHE_SIZE  (256 * 1024 * 1024)  // 8k
+//#define CACHE_SIZE  (256 * 1024 * 1024)  // 8k
+#define CACHE_SIZE  (1024 * 1024 * 1024)
 #define AVG_SIZE    (2 * 1024)  // 2k
 
 // ------------------------------------------

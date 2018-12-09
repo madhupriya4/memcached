@@ -331,17 +331,37 @@ int item_put_bdb(char *key, size_t nkey, item *it){
     dbkey.size = nkey;
     dbdata.data = it;
     dbdata.size = ITEM_ntotal(it);
+    bdb_put:
     ret = dbp->put(dbp, NULL, &dbkey, &dbdata, 0);
-    if (ret == 0) {
-        fprintf(stderr,"key=%s",key);
-        fprintf(stderr,"bdb store was successful\n");
-        return 0;
-    } else {
-        if (settings_bdb.verbose > 1) {
-            fprintf(stderr, "dbp->put: %s\n", db_strerror(ret));
-        }
-        return -1;
+    int retVal=0;
+    switch(ret) {
+        case 0:
+            fprintf(stderr, "key=%s", key);
+            fprintf(stderr, "bdb store was successful\n");
+            retVal=0;
+            break;
+        case ENOMEM:
+            fprintf(stderr,"bdb is full, trying to evict\n");
+            int *flag = malloc(sizeof(int));
+            *flag=1;
+            item_unlink_q(it, flag);
+            if(*flag==2)
+                goto bdb_put;
+            free(flag);
+            retVal=1;
+            break;
+        default:
+
+
+
+            if (settings_bdb.verbose > 1) {
+                fprintf(stderr, "dbp->put: %s\n", db_strerror(ret));
+            }
+            retVal=-1;
+
     }
+
+    return retVal;
 }
 
 /* 0 for Success

@@ -2886,8 +2886,11 @@ enum store_item_type do_store_item(item *it, int comm, conn *c, const uint32_t h
 
             STORAGE_delete(c->thread->storage, old_it);
             item_replace(old_it, it, hv);
-            item_put_bdb(key, bdb_old_it->nkey, it);
-            stored = STORED;
+            int bdb_ret=item_put_bdb(key, bdb_old_it->nkey, it);
+            if(bdb_ret==0)
+                stored = STORED;
+            else
+                stored=NOT_STORED;
         } else {
             pthread_mutex_lock(&c->thread->stats.mutex);
             c->thread->stats.slab_stats[ITEM_clsid(old_it)].cas_badval++;
@@ -2946,19 +2949,25 @@ enum store_item_type do_store_item(item *it, int comm, conn *c, const uint32_t h
             }
         }
 
+
         if (stored == NOT_STORED && failed_alloc == 0) {
+
+            int bdb_ret=0;
             if (old_it != NULL) {
                 STORAGE_delete(c->thread->storage, old_it);
                 item_replace(old_it, it, hv);
-                item_put_bdb(key, it->nkey, it);
+                bdb_ret=item_put_bdb(key, it->nkey, it);
             } else {
                 do_item_link(it, hv);
-                item_put_bdb(key, it->nkey, it);
+                bdb_ret=item_put_bdb(key, it->nkey, it);
             }
 
             c->cas = ITEM_get_cas(it);
 
-            stored = STORED;
+            if(bdb_ret==0)
+                stored = STORED;
+            else
+                stored=NOT_STORED;
         }
     }
 
@@ -2975,63 +2984,6 @@ enum store_item_type do_store_item(item *it, int comm, conn *c, const uint32_t h
             stored, comm, ITEM_key(it), it->nkey, it->exptime, ITEM_clsid(it));
 
     return stored;
-
-//    char *key = ITEM_key(it);
-    int ret;
-//    item *old_it = NULL;
-//    item *new_it = NULL;
-//    //int stored = 0;
-//    int flags;
-
-    if (comm == NREAD_ADD || comm == NREAD_REPLACE) {
-        ret = item_exists_bdb(key, strlen(key));
-        if ((ret == 0 && comm == NREAD_REPLACE) ||
-            (ret == 1 && comm == NREAD_ADD) ){
-            return 0;
-        }
-    } else if (comm == NREAD_APPEND || comm == NREAD_PREPEND){
-        /* get orignal item */
-        old_it = item_get_bdb(key, strlen(key));
-        if (old_it == NULL){
-            return 0;
-        }
-
-        /* we have it and old_it here - alloc memory to hold both */
-        /* flags was already lost - so recover them from ITEM_suffix(it) */
-        flags = (int) strtol(ITEM_suffix(old_it), (char **) NULL, 10);
-        new_it = item_alloc1_bdb(key, it->nkey, flags, it->nbytes + old_it->nbytes - 2 /* CRLF */);
-        if (new_it == NULL) {
-            /* SERVER_ERROR out of memory */
-            if (old_it != NULL)
-                item_free(old_it);
-            return 0;
-        }
-
-        /* copy data from it and old_it to new_it */
-        if (comm == NREAD_APPEND) {
-            memcpy(ITEM_data(new_it), ITEM_data(old_it), old_it->nbytes);
-            memcpy(ITEM_data(new_it) + old_it->nbytes - 2 /* CRLF */, ITEM_data(it), it->nbytes);
-        } else {
-            /* NREAD_PREPEND */
-            memcpy(ITEM_data(new_it), ITEM_data(it), it->nbytes);
-            memcpy(ITEM_data(new_it) + it->nbytes - 2 /* CRLF */, ITEM_data(old_it), old_it->nbytes);
-        }
-
-        it = new_it;
-    }
-
-    ret = item_put_bdb(key, strlen(key), it);
-
-    if (old_it != NULL)
-        item_free_bdb(old_it);
-    if (new_it != NULL)
-        item_free_bdb(new_it);
-
-    if (ret  == 0) {
-        return 1;
-    } else {
-        return 0;
-    }
 }
 
 typedef struct token_s {
