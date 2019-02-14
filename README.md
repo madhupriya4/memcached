@@ -1,37 +1,12 @@
-# Memcached
+# Implementation of Berkeley DB as an in-memory cache using Memcached
 
-Memcached is a high performance multithreaded event-based key/value cache
-store intended to be used in a distributed system.
-
-See: https://memcached.org/about
-
-A fun story explaining usage: https://memcached.org/tutorial
-
-If you're having trouble, try the wiki: https://memcached.org/wiki
-
-If you're trying to troubleshoot odd behavior or timeouts, see:
-https://memcached.org/timeouts
-
-https://memcached.org/ is a good resource in general. Please use the mailing
-list to ask questions, github issues aren't seen by everyone!
-
-## Dependencies
-
-* libevent, http://www.monkey.org/~provos/libevent/ (libevent-dev)
-* libseccomp, (optional, experimental, linux) - enables process restrictions for
-  better security. Tested only on x86_64 architectures.
-
-## Environment
-
-Be warned that the -k (mlockall) option to memcached might be
-dangerous when using a large cache.  Just make sure the memcached machines
-don't swap.  memcached does non-blocking network I/O, but not disk.  (it
-should never go to disk, or you've lost the whole point of it)
-
-## Website
-
-* http://www.memcached.org
-
-## Contributing
-
-See https://github.com/memcached/memcached/wiki/DevelopmentRepos
+Berkeley DB is a data store intended to provide a
+high-performance embedded database for key/value data. In order to make
+Berkeley DB function as a cache, an eviction strategy such as LRU must
+be implemented which will discard old cache entries to make room for
+new ones. In addition, various commands like get, set, add, replace, insert
+need to be implemented on top of Berkeley DB to make it a complete
+cache. In order to simplify this, we have used the networking layer of Memcached to
+map the commands along with its tried and tested LRU. After this is implemented,
+the Berkeley DB as a cache has been compared to the existing Memcached
+using YCSB.
